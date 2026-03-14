@@ -31,10 +31,6 @@ const Dashboard = `
         .btn-start:hover { background-color: #218838; }
         .btn-update { background-color: #007bff; display: none; }
         .btn-update:hover { background-color: #0069d9; }
-        .btn-pause-songs { background-color: #fd7e14; display: none; }
-        .btn-pause-songs:hover { background-color: #e86c0b; }
-        .btn-restart-songs { background-color: #20c997; display: none; }
-        .btn-restart-songs:hover { background-color: #1bab86; }
         .btn-stop { background-color: #dc3545; display: none; }
         .btn-stop:hover { background-color: #c82333; }
         .status-box { margin-top: 20px; padding: 20px; border-radius: 8px; background-color: #edf1f6; }
@@ -65,7 +61,7 @@ const Dashboard = `
             .sidebar, .content { padding: 18px; }
             h1 { font-size: 24px; }
             .btn-row { flex-direction: column; }
-            .btn-start, .btn-update, .btn-pause-songs, .btn-restart-songs, .btn-stop { width: 100%; }
+            .btn-start, .btn-update, .btn-stop { width: 100%; }
         }
     </style>
 </head>
@@ -122,8 +118,6 @@ const Dashboard = `
     <div class="btn-row">
         <button class="btn btn-start" id="startBtn" onclick="startStream()">Start Stream</button>
         <button class="btn btn-update" id="updateBtn" onclick="updatePlaylist()">Scan Folder & Update Playlist</button>
-        <button class="btn btn-pause-songs" id="pauseSongsBtn" onclick="stopSongs()">Stop Songs</button>
-        <button class="btn btn-restart-songs" id="restartSongsBtn" onclick="restartSongs()">Restart Songs</button>
         <button class="btn btn-stop" id="stopBtn" onclick="stopStream()">Stop Stream</button>
     </div>
 
@@ -240,8 +234,6 @@ const Dashboard = `
             const nowPlaying = document.getElementById('nowPlaying');
             const stopBtn = document.getElementById('stopBtn');
             const updateBtn = document.getElementById('updateBtn');
-            const pauseSongsBtn = document.getElementById('pauseSongsBtn');
-            const restartSongsBtn = document.getElementById('restartSongsBtn');
             const startBtn = document.getElementById('startBtn');
             const inputsPanel = document.getElementById('inputsPanel');
             const playlistBox = document.getElementById('playlistBox');
@@ -255,13 +247,6 @@ const Dashboard = `
                 startBtn.style.display = "none";
                 updateBtn.style.display = "block";
                 stopBtn.style.display = "block";
-                if (data.songsPaused) {
-                    pauseSongsBtn.style.display = "none";
-                    restartSongsBtn.style.display = "block";
-                } else {
-                    pauseSongsBtn.style.display = "block";
-                    restartSongsBtn.style.display = "none";
-                }
                 playlistBox.style.display = "block";
                 setInputsDisabled(inputsPanel, true);
             } else {
@@ -271,8 +256,6 @@ const Dashboard = `
                 startBtn.style.display = "inline-block";
                 updateBtn.style.display = "none";
                 stopBtn.style.display = "none";
-                pauseSongsBtn.style.display = "none";
-                restartSongsBtn.style.display = "none";
                 playlistBox.style.display = "none";
                 setInputsDisabled(inputsPanel, false);
             }
@@ -284,6 +267,10 @@ const Dashboard = `
     function setInputsDisabled(container, disabled) {
         const fields = container.querySelectorAll('input');
         for (const field of fields) {
+            if (field.id === 'shufflePlaylist') {
+                field.disabled = false;
+                continue;
+            }
             field.disabled = disabled;
         }
     }
@@ -348,48 +335,6 @@ const Dashboard = `
         }
     }
 
-    async function stopSongs() {
-        const btn = document.getElementById('pauseSongsBtn');
-        const originalText = btn.innerText;
-        btn.disabled = true;
-        btn.innerText = "Pausing...";
-
-        try {
-            const res = await fetch('/api/stop-songs', { method: 'POST' });
-            if (!res.ok) {
-                const message = await res.text();
-                throw new Error(message || 'Failed to stop songs');
-            }
-            await fetchStatus();
-        } catch (e) {
-            alert('Failed to stop songs: ' + e.message);
-        } finally {
-            btn.disabled = false;
-            btn.innerText = originalText;
-        }
-    }
-
-    async function restartSongs() {
-        const btn = document.getElementById('restartSongsBtn');
-        const originalText = btn.innerText;
-        btn.disabled = true;
-        btn.innerText = "Restarting...";
-
-        try {
-            const res = await fetch('/api/restart-songs', { method: 'POST' });
-            if (!res.ok) {
-                const message = await res.text();
-                throw new Error(message || 'Failed to restart songs');
-            }
-            await fetchStatus();
-        } catch (e) {
-            alert('Failed to restart songs: ' + e.message);
-        } finally {
-            btn.disabled = false;
-            btn.innerText = originalText;
-        }
-    }
-
     async function updatePlaylist() {
         const btn = document.getElementById('updateBtn');
         const originalText = btn.innerText;
@@ -397,7 +342,13 @@ const Dashboard = `
         btn.innerText = "Scanning...";
 
         try {
-            const res = await fetch('/api/update-playlist', { method: 'POST' });
+            const res = await fetch('/api/update-playlist', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    shufflePlaylist: document.getElementById('shufflePlaylist').checked
+                })
+            });
             if (!res.ok) {
                 const message = await res.text();
                 throw new Error(message || "Failed to update playlist");

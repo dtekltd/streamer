@@ -20,8 +20,6 @@ import (
 var ErrAlreadyRunning = errors.New("stream is already running")
 var ErrStreamNotRunning = errors.New("stream is not running")
 var ErrNoSongsFound = errors.New("no mp3 files found in directory")
-var ErrSongsAlreadyPaused = errors.New("songs are already paused")
-var ErrSongsNotPaused = errors.New("songs are not paused")
 
 type Service struct {
 	state *StreamState
@@ -49,7 +47,6 @@ func (s *Service) Start(req StartRequest) error {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	s.state.isRunning = true
-	s.state.songsPaused = false
 	s.state.shufflePlaylist = req.ShufflePlaylist
 	s.state.audioDir = req.AudioDir
 	s.state.songs = songs
@@ -74,11 +71,14 @@ func (s *Service) Start(req StartRequest) error {
 	return nil
 }
 
-func (s *Service) UpdatePlaylist() (int, error) {
+func (s *Service) UpdatePlaylist(shuffleOverride *bool) (int, error) {
 	s.state.mu.Lock()
 	if !s.state.isRunning {
 		s.state.mu.Unlock()
 		return 0, ErrStreamNotRunning
+	}
+	if shuffleOverride != nil {
+		s.state.shufflePlaylist = *shuffleOverride
 	}
 	audioDir := s.state.audioDir
 	shufflePlaylist := s.state.shufflePlaylist
@@ -112,38 +112,6 @@ func (s *Service) Stop() {
 	s.state.mu.Unlock()
 }
 
-func (s *Service) PauseSongs() error {
-	s.state.mu.Lock()
-	defer s.state.mu.Unlock()
-
-	if !s.state.isRunning {
-		return ErrStreamNotRunning
-	}
-	if s.state.songsPaused {
-		return ErrSongsAlreadyPaused
-	}
-
-	s.state.songsPaused = true
-	s.state.currentSong = "Paused (silence)"
-	s.state.nextSong = ""
-	return nil
-}
-
-func (s *Service) RestartSongs() error {
-	s.state.mu.Lock()
-	defer s.state.mu.Unlock()
-
-	if !s.state.isRunning {
-		return ErrStreamNotRunning
-	}
-	if !s.state.songsPaused {
-		return ErrSongsNotPaused
-	}
-
-	s.state.songsPaused = false
-	return nil
-}
-
 func (s *Service) Status() Status {
 	s.state.mu.Lock()
 	defer s.state.mu.Unlock()
@@ -155,49 +123,22 @@ func (s *Service) Status() Status {
 
 	return Status{
 		IsRunning:   s.state.isRunning,
-		SongsPaused: s.state.songsPaused,
 		CurrentSong: s.state.currentSong,
 		Songs:       songs,
 	}
 }
 
 func (s *Service) StreamAudio(w *bufio.Writer) error {
-	// Create a 5-second silent MP3 automatically if it doesn't exist
-	if _, err := os.Stat("silence.mp3"); os.IsNotExist(err) {
-		exec.Command("ffmpeg", "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo", "-t", "5", "-q:a", "9", "silence.mp3").Run()
-	}
-
 	for {
 		s.state.mu.Lock()
-		songs := append([]Song(nil), s.state.songs...)
+		songs := s.state.songs
+		isRunning := s.state.isRunning
 		nowPlayingLabel := s.state.nowPlayingLabel
 		nextSongLabel := s.state.nextSongLabel
-		isRunning := s.state.isRunning
-		songsPaused := s.state.songsPaused
 		s.state.mu.Unlock()
 
 		if !isRunning {
 			return nil
-		}
-
-		if songsPaused {
-			nowText := formatNowPlayingText(nowPlayingLabel, "Paused (silence)")
-			if err := os.WriteFile(nowPlayingFile, []byte(nowText), 0644); err != nil {
-				s.logf("Failed to update now playing file: %v\n", err)
-			}
-			if err := os.WriteFile(nextPlayingFile, []byte(""), 0644); err != nil {
-				s.logf("Failed to update next song file: %v\n", err)
-			}
-
-			silenceErr := s.streamFileChunked("silence.mp3", w, 5*time.Second, func() bool {
-				s.state.mu.Lock()
-				defer s.state.mu.Unlock()
-				return s.state.isRunning && s.state.songsPaused
-			})
-			if silenceErr != nil {
-				return silenceErr
-			}
-			continue
 		}
 
 		if len(songs) == 0 {
@@ -213,16 +154,12 @@ func (s *Service) StreamAudio(w *bufio.Writer) error {
 				s.state.mu.Unlock()
 				return nil
 			}
-			if s.state.songsPaused {
-				s.state.mu.Unlock()
-				break
-			}
 			s.state.currentSong = song.Name
 			s.state.nextSong = nextSongName
 			s.state.mu.Unlock()
 
-			// // Start the stopwatch!
-			// start := time.Now()
+			// Start the stopwatch!
+			start := time.Now()
 
 			nowText := formatNowPlayingText(nowPlayingLabel, song.Name)
 			if err := os.WriteFile(nowPlayingFile, []byte(nowText), 0644); err != nil {
@@ -234,30 +171,27 @@ func (s *Service) StreamAudio(w *bufio.Writer) error {
 				s.logf("Failed to update next song file: %v\n", err)
 			}
 
-			copyErr := s.streamFileChunked(song.Path, w, song.Duration, func() bool {
-				s.state.mu.Lock()
-				defer s.state.mu.Unlock()
-				return s.state.isRunning && !s.state.songsPaused
-			})
+			file, err := os.Open(song.Path)
+			if err != nil {
+				s.logf("Failed to open song %s: %v\n", song.Path, err)
+				continue
+			}
+
+			skipID3Tags(file)
+			_, copyErr := io.Copy(w, file)
+			file.Close()
 			if copyErr != nil {
 				return copyErr
 			}
 
-			s.state.mu.Lock()
-			songStillActive := s.state.isRunning && !s.state.songsPaused
-			s.state.mu.Unlock()
-			if !songStillActive {
-				break
+			// Look at the stopwatch. Wait out the remaining length of the song,
+			// minus a 3-second padding to keep FFmpeg's buffer fed!
+			elapsed := time.Since(start)
+			bufferPadding := 3 * time.Second
+
+			if elapsed+bufferPadding < song.Duration {
+				time.Sleep(song.Duration - elapsed - bufferPadding)
 			}
-
-			// // Look at the stopwatch. Wait out the remaining length of the song,
-			// // minus a 3-second padding to keep FFmpeg's buffer fed!
-			// elapsed := time.Since(start)
-			// bufferPadding := 3 * time.Second
-
-			// if elapsed+bufferPadding < song.Duration {
-			// 	time.Sleep(song.Duration - elapsed - bufferPadding)
-			// }
 
 			if err := w.Flush(); err != nil {
 				return err
@@ -270,7 +204,6 @@ func (s *Service) runStream(ctx context.Context, streamKey, videoFile, fontFile,
 	defer func() {
 		s.state.mu.Lock()
 		s.state.isRunning = false
-		s.state.songsPaused = false
 		s.state.currentSong = ""
 		s.state.nextSong = ""
 		s.state.shufflePlaylist = false
@@ -357,56 +290,6 @@ func (s *Service) runStream(ctx context.Context, streamKey, videoFile, fontFile,
 
 	if err := cmd.Run(); err != nil {
 		s.logf("FFmpeg exited: %v\n", err)
-	}
-}
-
-func (s *Service) streamFileChunked(path string, w *bufio.Writer, duration time.Duration, keepStreaming func() bool) error {
-	file, err := os.Open(path)
-	if err != nil {
-		s.logf("Failed to open audio file %s: %v\n", path, err)
-		return err
-	}
-	defer file.Close()
-
-	skipID3Tags(file)
-	buffer := make([]byte, 32*1024)
-
-	// Start the stopwatch!
-	start := time.Now()
-
-	for {
-		if !keepStreaming() {
-			if err := w.Flush(); err != nil {
-				return err
-			}
-			return nil
-		}
-
-		n, readErr := file.Read(buffer)
-		if n > 0 {
-			if _, writeErr := w.Write(buffer[:n]); writeErr != nil {
-				return writeErr
-			}
-		}
-
-		if errors.Is(readErr, io.EOF) {
-			// Look at the stopwatch. Wait out the remaining length of the song,
-			// minus a 3-second padding to keep FFmpeg's buffer fed!
-			elapsed := time.Since(start)
-			bufferPadding := 3 * time.Second
-
-			if elapsed+bufferPadding < duration {
-				time.Sleep(duration - elapsed - bufferPadding)
-			}
-
-			if err := w.Flush(); err != nil {
-				return err
-			}
-			return nil
-		}
-		if readErr != nil {
-			return readErr
-		}
 	}
 }
 

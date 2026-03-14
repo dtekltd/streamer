@@ -28,8 +28,6 @@ func (h *Handler) RegisterRoutes(app *fiber.App) {
 	api := app.Group("/api")
 	api.Post("/start", h.handleStartStream)
 	api.Post("/stop", h.handleStopStream)
-	api.Post("/stop-songs", h.handleStopSongs)
-	api.Post("/restart-songs", h.handleRestartSongs)
 	api.Post("/update-playlist", h.handleUpdatePlaylist)
 	api.Get("/status", h.handleStatus)
 	api.Get("/settings", h.handleGetSettings)
@@ -71,36 +69,18 @@ func (h *Handler) handleStopStream(c *fiber.Ctx) error {
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{"message": "Stream stopping"})
 }
 
-func (h *Handler) handleStopSongs(c *fiber.Ctx) error {
-	if err := h.streamService.PauseSongs(); err != nil {
-		if errors.Is(err, stream.ErrStreamNotRunning) {
-			return c.Status(fiber.StatusBadRequest).SendString("Stream is not running")
-		}
-		if errors.Is(err, stream.ErrSongsAlreadyPaused) {
-			return c.Status(fiber.StatusConflict).SendString("Songs are already paused")
-		}
-		return c.Status(fiber.StatusInternalServerError).SendString(err.Error())
-	}
-
-	return c.JSON(fiber.Map{"message": "Songs paused. Streaming silence.mp3"})
-}
-
-func (h *Handler) handleRestartSongs(c *fiber.Ctx) error {
-	if err := h.streamService.RestartSongs(); err != nil {
-		if errors.Is(err, stream.ErrStreamNotRunning) {
-			return c.Status(fiber.StatusBadRequest).SendString("Stream is not running")
-		}
-		if errors.Is(err, stream.ErrSongsNotPaused) {
-			return c.Status(fiber.StatusConflict).SendString("Songs are not paused")
-		}
-		return c.Status(fiber.StatusInternalServerError).SendString(err.Error())
-	}
-
-	return c.JSON(fiber.Map{"message": "Songs restarted"})
-}
-
 func (h *Handler) handleUpdatePlaylist(c *fiber.Ctx) error {
-	count, err := h.streamService.UpdatePlaylist()
+	var req struct {
+		ShufflePlaylist *bool `json:"shufflePlaylist"`
+	}
+
+	if len(c.Body()) > 0 {
+		if err := c.BodyParser(&req); err != nil {
+			return c.Status(fiber.StatusBadRequest).SendString(err.Error())
+		}
+	}
+
+	count, err := h.streamService.UpdatePlaylist(req.ShufflePlaylist)
 	if err != nil {
 		if errors.Is(err, stream.ErrStreamNotRunning) {
 			return c.Status(fiber.StatusBadRequest).SendString("Stream is not running")
