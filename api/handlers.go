@@ -1,8 +1,10 @@
 package api
 
 import (
+	"bufio"
 	"errors"
 
+	"streamer/config"
 	apphtml "streamer/html"
 	"streamer/stream"
 
@@ -11,24 +13,27 @@ import (
 
 type Handler struct {
 	streamService *stream.Service
+	serverMode    string
 }
 
-func NewHandler() *Handler {
-	return &Handler{streamService: stream.NewService()}
+func NewHandler(cfg config.AppConfig) *Handler {
+	return &Handler{streamService: stream.NewService(cfg), serverMode: cfg.ServerMode}
 }
 
 func (h *Handler) RegisterRoutes(app *fiber.App) {
 	app.Get("/", h.serveDashboard)
+	app.Get("/internal/audio", h.handleInternalAudio)
 
 	api := app.Group("/api")
 	api.Post("/start", h.handleStartStream)
 	api.Post("/stop", h.handleStopStream)
+	api.Post("/update-playlist", h.handleUpdatePlaylist)
 	api.Get("/status", h.handleStatus)
 }
 
 func (h *Handler) serveDashboard(c *fiber.Ctx) error {
 	c.Type("html", "utf-8")
-	return c.SendString(apphtml.Dashboard)
+	return c.SendString(apphtml.RenderDashboard(h.serverMode))
 }
 
 func (h *Handler) handleStatus(c *fiber.Ctx) error {
@@ -59,4 +64,27 @@ func (h *Handler) handleStopStream(c *fiber.Ctx) error {
 	h.streamService.Stop()
 
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{"message": "Stream stopping"})
+}
+
+func (h *Handler) handleUpdatePlaylist(c *fiber.Ctx) error {
+	count, err := h.streamService.UpdatePlaylist()
+	if err != nil {
+		if errors.Is(err, stream.ErrStreamNotRunning) {
+			return c.Status(fiber.StatusBadRequest).SendString("Stream is not running")
+		}
+		if errors.Is(err, stream.ErrNoSongsFound) {
+			return c.Status(fiber.StatusBadRequest).SendString("No MP3 files found in the audio directory")
+		}
+		return c.Status(fiber.StatusInternalServerError).SendString(err.Error())
+	}
+
+	return c.JSON(fiber.Map{"message": "Playlist updated", "songs": count})
+}
+
+func (h *Handler) handleInternalAudio(c *fiber.Ctx) error {
+	c.Set("Content-Type", "audio/mpeg")
+	c.Context().SetBodyStreamWriter(func(w *bufio.Writer) {
+		_ = h.streamService.StreamAudio(w)
+	})
+	return nil
 }
