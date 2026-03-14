@@ -1,4 +1,4 @@
-package models
+package stream
 
 import (
 	"context"
@@ -6,16 +6,21 @@ import (
 	"time"
 )
 
-const NowPlayingFile = "now_playing.txt"
+const nowPlayingFile = "now_playing.txt"
 
 type StreamState struct {
-	Mu          sync.Mutex         `json:"-"`
-	IsRunning   bool               `json:"isRunning"`
-	CurrentSong string             `json:"currentSong"`
-	Cancel      context.CancelFunc `json:"-"`
+	mu          sync.Mutex
+	isRunning   bool
+	currentSong string
+	cancel      context.CancelFunc
 }
 
-type StartStreamRequest struct {
+type Status struct {
+	IsRunning   bool   `json:"isRunning"`
+	CurrentSong string `json:"currentSong"`
+}
+
+type StartRequest struct {
 	StreamKey string `json:"streamKey"`
 	VideoPath string `json:"videoPath"`
 	AudioDir  string `json:"audioDir"`

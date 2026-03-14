@@ -16,7 +16,7 @@ func Dump(data any, args ...any) {
 }
 
 func ToString(data any) string {
-	switch data.(type) {
+	switch data := data.(type) {
 	case int:
 		return fmt.Sprintf("%d", data)
 	case float32:
@@ -24,7 +24,7 @@ func ToString(data any) string {
 	case float64:
 		return fmt.Sprintf("%f", data)
 	case string:
-		return data.(string)
+		return data
 	default:
 	}
 	text, err := json.MarshalIndent(data, "", "    ")
