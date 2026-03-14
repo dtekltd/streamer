@@ -31,6 +31,10 @@ const Dashboard = `
         .btn-start:hover { background-color: #218838; }
         .btn-update { background-color: #007bff; display: none; }
         .btn-update:hover { background-color: #0069d9; }
+        .btn-pause-songs { background-color: #fd7e14; display: none; }
+        .btn-pause-songs:hover { background-color: #e86c0b; }
+        .btn-restart-songs { background-color: #20c997; display: none; }
+        .btn-restart-songs:hover { background-color: #1bab86; }
         .btn-stop { background-color: #dc3545; display: none; }
         .btn-stop:hover { background-color: #c82333; }
         .status-box { margin-top: 20px; padding: 20px; border-radius: 8px; background-color: #edf1f6; }
@@ -45,6 +49,15 @@ const Dashboard = `
         .playlist-list { margin: 0; padding-left: 25px; max-height: 400px; overflow: auto; }
         .playlist-list li { margin: 5px 0; color: #444; }
         .playlist-list li.playing { color: #28a745; font-weight: bold; }
+        .saved-indicator { font-size: 12px; color: #28a745; opacity: 0; transition: opacity 0.4s; margin-left: 8px; vertical-align: middle; }
+        .sidebar-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+        .sidebar-header h1 { flex: 1; }
+        .sidebar-toggle { background: none; border: 1px solid #cfd6df; border-radius: 6px; cursor: pointer; padding: 6px 9px; color: #5e6672; font-size: 16px; line-height: 1; flex-shrink: 0; margin-top: 4px; transition: background 0.15s, color 0.15s; }
+        .sidebar-toggle:hover { background: #eef1f5; color: #222; }
+        .sidebar-toggle .chevron { display: inline-block; transition: transform 0.25s; }
+        .sidebar.collapsed .chevron { transform: rotate(-90deg); }
+        .sidebar-body { overflow: hidden; transition: max-height 0.3s ease, opacity 0.25s ease; max-height: 2000px; opacity: 1; }
+        .sidebar.collapsed .sidebar-body { max-height: 0; opacity: 0; }
 
         @media (max-width: 900px) {
             body { padding: 14px; }
@@ -52,17 +65,23 @@ const Dashboard = `
             .sidebar, .content { padding: 18px; }
             h1 { font-size: 24px; }
             .btn-row { flex-direction: column; }
-            .btn-start, .btn-update, .btn-stop { width: 100%; }
+            .btn-start, .btn-update, .btn-pause-songs, .btn-restart-songs, .btn-stop { width: 100%; }
         }
     </style>
 </head>
 <body>
 
 <div class="layout">
-    <aside class="panel sidebar">
-        <h1>🔴 Stream Controller</h1>
-        <p class="subtitle">Sidebar contains all stream inputs.</p>
+    <aside class="panel sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <h1>🔴 Stream Controller</h1>
+            <button class="sidebar-toggle" id="sidebarToggle" onclick="toggleSidebar()" title="Toggle settings panel">
+                <span class="chevron">&#9660;</span>
+            </button>
+        </div>
+        <p class="subtitle">Settings panel. <span id="settingsSavedIndicator" class="saved-indicator">✓ Saved</span></p>
 
+        <div class="sidebar-body" id="sidebarBody">
         <div id="inputsPanel">
         <label for="streamKey">YouTube Stream Key</label>
         <input type="text" id="streamKey" value="__DEFAULT_STREAM_KEY__" placeholder="xxxx-xxxx-xxxx-xxxx">
@@ -93,6 +112,7 @@ const Dashboard = `
         <label for="nextSongLabel">Next Song Label</label>
         <input type="text" id="nextSongLabel" value="Next song:" placeholder="Leave empty to hide">
         </div>
+        </div><!-- /sidebar-body -->
     </aside>
 
     <main class="panel content">
@@ -102,6 +122,8 @@ const Dashboard = `
     <div class="btn-row">
         <button class="btn btn-start" id="startBtn" onclick="startStream()">Start Stream</button>
         <button class="btn btn-update" id="updateBtn" onclick="updatePlaylist()">Scan Folder & Update Playlist</button>
+        <button class="btn btn-pause-songs" id="pauseSongsBtn" onclick="stopSongs()">Stop Songs</button>
+        <button class="btn btn-restart-songs" id="restartSongsBtn" onclick="restartSongs()">Restart Songs</button>
         <button class="btn btn-stop" id="stopBtn" onclick="stopStream()">Stop Stream</button>
     </div>
 
@@ -121,6 +143,90 @@ const Dashboard = `
 </div>
 
 <script>
+    let saveSettingsTimer = null;
+
+    document.addEventListener('DOMContentLoaded', async function() {
+        initSidebar();
+        await loadSettings();
+        document.getElementById('inputsPanel').querySelectorAll('input').forEach(function(el) {
+            el.addEventListener('input', scheduleSettingsSave);
+            el.addEventListener('change', scheduleSettingsSave);
+        });
+    });
+
+    function initSidebar() {
+        // On mobile default to collapsed; on desktop default to expanded.
+        const isMobile = window.innerWidth <= 900;
+        const stored = localStorage.getItem('sidebarCollapsed');
+        const shouldCollapse = stored !== null ? stored === 'true' : isMobile;
+        if (shouldCollapse) {
+            document.getElementById('sidebar').classList.add('collapsed');
+        }
+    }
+
+    function toggleSidebar() {
+        const sidebar = document.getElementById('sidebar');
+        const collapsed = sidebar.classList.toggle('collapsed');
+        localStorage.setItem('sidebarCollapsed', collapsed);
+    }
+
+    async function loadSettings() {
+        try {
+            const res = await fetch('/api/settings');
+            if (!res.ok) return;
+            const s = await res.json();
+            if (!s.saved) return; // no settings saved yet — keep HTML defaults
+            document.getElementById('streamKey').value = s.stream_key || '';
+            document.getElementById('videoPath').value = s.video_path || '';
+            document.getElementById('audioDir').value  = s.audio_dir  || '';
+            document.getElementById('shufflePlaylist').checked = !!s.shuffle_playlist;
+            document.getElementById('fontPath').value  = s.font_path  || '';
+            document.getElementById('textX').value     = s.text_x     || '30';
+            document.getElementById('textY').value     = s.text_y     || 'h-th-30';
+            document.getElementById('nowPlayingLabel').value = s.now_playing_label !== undefined ? s.now_playing_label : 'Now Playing:';
+            document.getElementById('nextSongLabel').value   = s.next_song_label   !== undefined ? s.next_song_label   : 'Next song:';
+        } catch (e) {
+            console.error('Failed to load settings', e);
+        }
+    }
+
+    function scheduleSettingsSave() {
+        clearTimeout(saveSettingsTimer);
+        saveSettingsTimer = setTimeout(saveSettings, 800);
+    }
+
+    async function saveSettings() {
+        const payload = {
+            stream_key:        document.getElementById('streamKey').value,
+            video_path:        document.getElementById('videoPath').value,
+            audio_dir:         document.getElementById('audioDir').value,
+            shuffle_playlist:  document.getElementById('shufflePlaylist').checked,
+            font_path:         document.getElementById('fontPath').value,
+            text_x:            document.getElementById('textX').value,
+            text_y:            document.getElementById('textY').value,
+            now_playing_label: document.getElementById('nowPlayingLabel').value,
+            next_song_label:   document.getElementById('nextSongLabel').value
+        };
+        try {
+            const res = await fetch('/api/settings', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            if (res.ok) showSavedIndicator();
+        } catch (e) {
+            console.error('Failed to save settings', e);
+        }
+    }
+
+    function showSavedIndicator() {
+        const ind = document.getElementById('settingsSavedIndicator');
+        if (!ind) return;
+        ind.style.opacity = '1';
+        clearTimeout(ind._hideTimer);
+        ind._hideTimer = setTimeout(function() { ind.style.opacity = '0'; }, 1500);
+    }
+
     setInterval(fetchStatus, 2000);
     fetchStatus();
 
@@ -134,6 +240,8 @@ const Dashboard = `
             const nowPlaying = document.getElementById('nowPlaying');
             const stopBtn = document.getElementById('stopBtn');
             const updateBtn = document.getElementById('updateBtn');
+            const pauseSongsBtn = document.getElementById('pauseSongsBtn');
+            const restartSongsBtn = document.getElementById('restartSongsBtn');
             const startBtn = document.getElementById('startBtn');
             const inputsPanel = document.getElementById('inputsPanel');
             const playlistBox = document.getElementById('playlistBox');
@@ -147,6 +255,13 @@ const Dashboard = `
                 startBtn.style.display = "none";
                 updateBtn.style.display = "block";
                 stopBtn.style.display = "block";
+                if (data.songsPaused) {
+                    pauseSongsBtn.style.display = "none";
+                    restartSongsBtn.style.display = "block";
+                } else {
+                    pauseSongsBtn.style.display = "block";
+                    restartSongsBtn.style.display = "none";
+                }
                 playlistBox.style.display = "block";
                 setInputsDisabled(inputsPanel, true);
             } else {
@@ -156,6 +271,8 @@ const Dashboard = `
                 startBtn.style.display = "inline-block";
                 updateBtn.style.display = "none";
                 stopBtn.style.display = "none";
+                pauseSongsBtn.style.display = "none";
+                restartSongsBtn.style.display = "none";
                 playlistBox.style.display = "none";
                 setInputsDisabled(inputsPanel, false);
             }
@@ -228,6 +345,48 @@ const Dashboard = `
         if (confirm("Are you sure you want to stop the stream?")) {
             await fetch('/api/stop', { method: 'POST' });
             setTimeout(fetchStatus, 500);
+        }
+    }
+
+    async function stopSongs() {
+        const btn = document.getElementById('pauseSongsBtn');
+        const originalText = btn.innerText;
+        btn.disabled = true;
+        btn.innerText = "Pausing...";
+
+        try {
+            const res = await fetch('/api/stop-songs', { method: 'POST' });
+            if (!res.ok) {
+                const message = await res.text();
+                throw new Error(message || 'Failed to stop songs');
+            }
+            await fetchStatus();
+        } catch (e) {
+            alert('Failed to stop songs: ' + e.message);
+        } finally {
+            btn.disabled = false;
+            btn.innerText = originalText;
+        }
+    }
+
+    async function restartSongs() {
+        const btn = document.getElementById('restartSongsBtn');
+        const originalText = btn.innerText;
+        btn.disabled = true;
+        btn.innerText = "Restarting...";
+
+        try {
+            const res = await fetch('/api/restart-songs', { method: 'POST' });
+            if (!res.ok) {
+                const message = await res.text();
+                throw new Error(message || 'Failed to restart songs');
+            }
+            await fetchStatus();
+        } catch (e) {
+            alert('Failed to restart songs: ' + e.message);
+        } finally {
+            btn.disabled = false;
+            btn.innerText = originalText;
         }
     }
 

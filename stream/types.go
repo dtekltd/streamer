@@ -12,6 +12,7 @@ const nextPlayingFile = "next_playing.txt"
 type StreamState struct {
 	mu              sync.Mutex
 	isRunning       bool
+	songsPaused     bool
 	shufflePlaylist bool
 	currentSong     string
 	nextSong        string
@@ -24,6 +25,7 @@ type StreamState struct {
 
 type Status struct {
 	IsRunning   bool     `json:"isRunning"`
+	SongsPaused bool     `json:"songsPaused"`
 	CurrentSong string   `json:"currentSong"`
 	Songs       []string `json:"songs"`
 }
