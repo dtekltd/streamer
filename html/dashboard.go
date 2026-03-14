@@ -22,6 +22,8 @@ const Dashboard = `
         .subtitle { margin: 0 0 10px; color: #5e6672; font-size: 14px; }
         label { font-weight: bold; display: block; margin-top: 13px; margin-bottom: 5px; }
         input[type="text"] { width: 100%; padding: 10px; border: 1px solid #cfd6df; border-radius: 6px; box-sizing: border-box; }
+        .checkbox-row { display: flex; align-items: center; gap: 8px; margin-top: 14px; }
+        .checkbox-row label { margin: 0; font-weight: 600; cursor: pointer; }
         .btn { padding: 12px 20px; border: none; border-radius: 6px; cursor: pointer; font-size: 15px; font-weight: bold; color: white; transition: 0.2s; }
         .btn:disabled { opacity: 0.7; cursor: not-allowed; }
         .btn-row { margin-top: 16px; display: flex; gap: 10px; flex-wrap: wrap; }
@@ -40,7 +42,7 @@ const Dashboard = `
         .playlist-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
         .playlist-box h4 { margin: 0; color: #222; }
         .badge { background: #1f6feb; color: #fff; border-radius: 999px; padding: 4px 10px; font-size: 12px; font-weight: 700; }
-        .playlist-list { margin: 0; padding-left: 20px; max-height: 220px; overflow: auto; }
+        .playlist-list { margin: 0; padding-left: 25px; max-height: 400px; overflow: auto; }
         .playlist-list li { margin: 5px 0; color: #444; }
         .playlist-list li.playing { color: #28a745; font-weight: bold; }
 
@@ -70,6 +72,11 @@ const Dashboard = `
 
         <label for="audioDir">Audio Directory</label>
         <input type="text" id="audioDir" value="__DEFAULT_AUDIO_DIR__" placeholder="C:\\music or ./music">
+
+        <div class="checkbox-row">
+            <input type="checkbox" id="shufflePlaylist">
+            <label for="shufflePlaylist">Shuffle Playlist</label>
+        </div>
 
         <label for="fontPath">Font File Path</label>
         <input type="text" id="fontPath" value="__DEFAULT_FONT_PATH__" placeholder="font.ttf">
@@ -192,6 +199,7 @@ const Dashboard = `
             streamKey: document.getElementById('streamKey').value,
             videoPath: document.getElementById('videoPath').value,
             audioDir: document.getElementById('audioDir').value,
+            shufflePlaylist: document.getElementById('shufflePlaylist').checked,
             fontPath: document.getElementById('fontPath').value,
             textX: document.getElementById('textX').value,
             textY: document.getElementById('textY').value,

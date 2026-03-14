@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -30,7 +31,7 @@ func NewService(cfg config.AppConfig) *Service {
 }
 
 func (s *Service) Start(req StartRequest) error {
-	songs, err := prepareAudioList(req.AudioDir)
+	songs, err := prepareAudioList(req.AudioDir, req.ShufflePlaylist)
 	if err != nil {
 		return err
 	}
@@ -46,6 +47,7 @@ func (s *Service) Start(req StartRequest) error {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	s.state.isRunning = true
+	s.state.shufflePlaylist = req.ShufflePlaylist
 	s.state.audioDir = req.AudioDir
 	s.state.songs = songs
 	s.state.currentSong = ""
@@ -76,9 +78,10 @@ func (s *Service) UpdatePlaylist() (int, error) {
 		return 0, ErrStreamNotRunning
 	}
 	audioDir := s.state.audioDir
+	shufflePlaylist := s.state.shufflePlaylist
 	s.state.mu.Unlock()
 
-	songs, err := prepareAudioList(audioDir)
+	songs, err := prepareAudioList(audioDir, shufflePlaylist)
 	if err != nil {
 		return 0, err
 	}
@@ -155,9 +158,14 @@ func (s *Service) StreamAudio(w *bufio.Writer) error {
 			// Start the stopwatch!
 			start := time.Now()
 
-			text := formatOverlayText(nowPlayingLabel, song.Name, nextSongLabel, nextSongName)
-			if err := os.WriteFile(nowPlayingFile, []byte(text), 0644); err != nil {
+			nowText := formatNowPlayingText(nowPlayingLabel, song.Name)
+			if err := os.WriteFile(nowPlayingFile, []byte(nowText), 0644); err != nil {
 				s.logf("Failed to update now playing file: %v\n", err)
+			}
+
+			nextText := formatNextSongText(nextSongLabel, nextSongName)
+			if err := os.WriteFile(nextPlayingFile, []byte(nextText), 0644); err != nil {
+				s.logf("Failed to update next song file: %v\n", err)
 			}
 
 			file, err := os.Open(song.Path)
@@ -195,6 +203,7 @@ func (s *Service) runStream(ctx context.Context, streamKey, videoFile, fontFile,
 		s.state.isRunning = false
 		s.state.currentSong = ""
 		s.state.nextSong = ""
+		s.state.shufflePlaylist = false
 		s.state.nowPlayingLabel = ""
 		s.state.nextSongLabel = ""
 		s.state.songs = nil
@@ -202,22 +211,40 @@ func (s *Service) runStream(ctx context.Context, streamKey, videoFile, fontFile,
 		s.state.cancel = nil
 		s.state.mu.Unlock()
 		os.Remove(nowPlayingFile)
+		os.Remove(nextPlayingFile)
 		s.logln("Stream fully stopped and cleaned up.")
 	}()
 
 	nowPlayingLabel, nextSongLabel := s.getOverlayLabels()
-	initialText := formatOverlayText(nowPlayingLabel, "Starting...", nextSongLabel, "")
+	nowInitialText := formatNowPlayingText(nowPlayingLabel, "Starting...")
+	nextInitialText := formatNextSongText(nextSongLabel, "")
 
 	// Ensure drawtext can read a non-empty file before FFmpeg starts.
-	if err := os.WriteFile(nowPlayingFile, []byte(initialText), 0644); err != nil {
+	if err := os.WriteFile(nowPlayingFile, []byte(nowInitialText), 0644); err != nil {
 		s.logf("Failed to initialize now playing file: %v\n", err)
+	}
+	if err := os.WriteFile(nextPlayingFile, []byte(nextInitialText), 0644); err != nil {
+		s.logf("Failed to initialize next song file: %v\n", err)
 	}
 
 	rtmpURL := fmt.Sprintf(s.cfg.StreamURLTemplate, streamKey)
 	internalAudioURL := fmt.Sprintf("http://127.0.0.1:%s/internal/audio", s.cfg.ServerPort)
 	safeFontPath := filepath.ToSlash(fontFile)                  // Convert Windows backslashes to forward slashes
 	safeFontPath = strings.Replace(safeFontPath, ":", "\\:", 1) // Escape the Windows drive colon (e.g., turns "E:/" into "E\:/")
-	drawtextFilter := fmt.Sprintf("drawtext=fontfile='%s':textfile='%s':reload=1:fontcolor=white:fontsize=40:box=1:boxcolor=black@0.6:boxborderw=10:x=%s:y=%s", safeFontPath, nowPlayingFile, textX, textY)
+	nowTextY := textY
+	nextTextY := fmt.Sprintf("(%s)+55", textY)
+
+	// Draw the Now Playing text (large and white)
+	drawNowPlaying := fmt.Sprintf("drawtext=fontfile='%s':textfile='%s':reload=1:fontcolor=white:fontsize=40:box=1:boxcolor=black@0.6:boxborderw=10:x=%s:y=%s", safeFontPath, nowPlayingFile, textX, nowTextY)
+
+	combinedFilter := ""
+	if normalizeNextSongLabel(nextSongLabel) == "" {
+		combinedFilter = fmt.Sprintf("[0:v]%s[v]", drawNowPlaying)
+	} else {
+		// Draw the Next Song text (smaller and light gray)
+		drawNextPlaying := fmt.Sprintf("drawtext=fontfile='%s':textfile='%s':reload=1:fontcolor=white@0.7:fontsize=30:box=1:boxcolor=black@0.6:boxborderw=10:x=%s:y=%s", safeFontPath, nextPlayingFile, textX, nextTextY)
+		combinedFilter = fmt.Sprintf("[0:v]%s,%s[v]", drawNowPlaying, drawNextPlaying)
+	}
 
 	args := []string{
 		"-re",
@@ -227,7 +254,7 @@ func (s *Service) runStream(ctx context.Context, streamKey, videoFile, fontFile,
 		"-reconnect_streamed", "1",
 		"-reconnect_delay_max", "5",
 		"-i", internalAudioURL,
-		"-filter_complex", fmt.Sprintf("[0:v]%s[v]", drawtextFilter),
+		"-filter_complex", combinedFilter,
 		"-map", "[v]",
 		"-map", "1:a",
 		"-c:v", "libx264",
@@ -263,7 +290,7 @@ func (s *Service) runStream(ctx context.Context, streamKey, videoFile, fontFile,
 	}
 }
 
-func prepareAudioList(dir string) ([]Song, error) {
+func prepareAudioList(dir string, shuffle bool) ([]Song, error) {
 	var songs []Song
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -287,10 +314,12 @@ func prepareAudioList(dir string) ([]Song, error) {
 		}
 	}
 
-	// Do not sort songs alphabetically to preserve the order in which they are read from the directory
-	// sort.Slice(songs, func(i, j int) bool {
-	// 	return strings.ToLower(songs[i].Name) < strings.ToLower(songs[j].Name)
-	// })
+	if shuffle && len(songs) > 1 {
+		rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+		rng.Shuffle(len(songs), func(i, j int) {
+			songs[i], songs[j] = songs[j], songs[i]
+		})
+	}
 
 	return songs, nil
 }
@@ -357,18 +386,18 @@ func normalizeNextSongLabel(label string) string {
 	return strings.TrimSpace(label)
 }
 
-func formatOverlayText(nowLabel, currentSong, nextLabel, nextSong string) string {
-	nowText := formatNowPlayingText(nowLabel, currentSong)
-	if normalizeNextSongLabel(nextLabel) == "" {
-		return nowText
+func formatNextSongText(label, song string) string {
+	cleanLabel := normalizeNextSongLabel(label)
+	if cleanLabel == "" {
+		return ""
 	}
 
-	cleanNextSong := strings.TrimSpace(nextSong)
-	if cleanNextSong == "" {
-		return nowText
+	cleanSong := strings.TrimSpace(song)
+	if cleanSong == "" {
+		return ""
 	}
 
-	return fmt.Sprintf("%s | %s %s", nowText, normalizeNextSongLabel(nextLabel), cleanNextSong)
+	return fmt.Sprintf("%s %s", cleanLabel, cleanSong)
 }
 
 func (s *Service) logf(format string, args ...any) {
