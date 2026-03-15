@@ -4,4 +4,5 @@ settings.yaml
 silence.mp3
 streamer.exe
 now_playing.txt
+next_playing.txt
 /tmp

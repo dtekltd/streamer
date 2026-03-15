@@ -9,10 +9,17 @@ import (
 const nowPlayingFile = "now_playing.txt"
 const nextPlayingFile = "next_playing.txt"
 
+const (
+	PlaylistOrderNormal  = "normal"
+	PlaylistOrderAZ      = "a-z"
+	PlaylistOrderZA      = "z-a"
+	PlaylistOrderShuffle = "shuffle"
+)
+
 type StreamState struct {
 	mu              sync.Mutex
 	isRunning       bool
-	shufflePlaylist bool
+	playlistOrder   string
 	currentSong     string
 	nextSong        string
 	nowPlayingLabel string
@@ -22,17 +29,24 @@ type StreamState struct {
 	cancel          context.CancelFunc
 }
 
+type PlaylistItem struct {
+	Name     string `json:"name"`
+	Start    string `json:"start"`
+	Duration string `json:"duration"`
+	Display  string `json:"display"`
+}
+
 type Status struct {
-	IsRunning   bool     `json:"isRunning"`
-	CurrentSong string   `json:"currentSong"`
-	Songs       []string `json:"songs"`
+	IsRunning   bool           `json:"isRunning"`
+	CurrentSong string         `json:"currentSong"`
+	Songs       []PlaylistItem `json:"songs"`
 }
 
 type StartRequest struct {
 	StreamKey       string `json:"streamKey"`
 	VideoPath       string `json:"videoPath"`
 	AudioDir        string `json:"audioDir"`
-	ShufflePlaylist bool   `json:"shufflePlaylist"`
+	PlaylistOrder   string `json:"playlistOrder"`
 	FontPath        string `json:"fontPath"`
 	TextX           string `json:"textX"`
 	TextY           string `json:"textY"`

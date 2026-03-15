@@ -15,7 +15,8 @@ type DashboardSettings struct {
 	StreamKey       string `yaml:"stream_key"        json:"stream_key"`
 	VideoPath       string `yaml:"video_path"        json:"video_path"`
 	AudioDir        string `yaml:"audio_dir"         json:"audio_dir"`
-	ShufflePlaylist bool   `yaml:"shuffle_playlist"  json:"shuffle_playlist"`
+	PlaylistOrder   string `yaml:"playlist_order"    json:"playlist_order"`
+	ShufflePlaylist bool   `yaml:"shuffle_playlist,omitempty"  json:"shuffle_playlist,omitempty"`
 	FontPath        string `yaml:"font_path"         json:"font_path"`
 	TextX           string `yaml:"text_x"            json:"text_x"`
 	TextY           string `yaml:"text_y"            json:"text_y"`

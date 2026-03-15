@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -31,7 +32,8 @@ func NewService(cfg config.AppConfig) *Service {
 }
 
 func (s *Service) Start(req StartRequest) error {
-	songs, err := prepareAudioList(req.AudioDir, req.ShufflePlaylist)
+	playlistOrder := normalizePlaylistOrder(req.PlaylistOrder)
+	songs, err := prepareAudioList(req.AudioDir, playlistOrder)
 	if err != nil {
 		return err
 	}
@@ -47,7 +49,7 @@ func (s *Service) Start(req StartRequest) error {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	s.state.isRunning = true
-	s.state.shufflePlaylist = req.ShufflePlaylist
+	s.state.playlistOrder = playlistOrder
 	s.state.audioDir = req.AudioDir
 	s.state.songs = songs
 	s.state.currentSong = ""
@@ -71,20 +73,20 @@ func (s *Service) Start(req StartRequest) error {
 	return nil
 }
 
-func (s *Service) UpdatePlaylist(shuffleOverride *bool) (int, error) {
+func (s *Service) UpdatePlaylist(orderOverride *string) (int, error) {
 	s.state.mu.Lock()
 	if !s.state.isRunning {
 		s.state.mu.Unlock()
 		return 0, ErrStreamNotRunning
 	}
-	if shuffleOverride != nil {
-		s.state.shufflePlaylist = *shuffleOverride
+	if orderOverride != nil {
+		s.state.playlistOrder = normalizePlaylistOrder(*orderOverride)
 	}
 	audioDir := s.state.audioDir
-	shufflePlaylist := s.state.shufflePlaylist
+	playlistOrder := s.state.playlistOrder
 	s.state.mu.Unlock()
 
-	songs, err := prepareAudioList(audioDir, shufflePlaylist)
+	songs, err := prepareAudioList(audioDir, playlistOrder)
 	if err != nil {
 		return 0, err
 	}
@@ -116,15 +118,25 @@ func (s *Service) Status() Status {
 	s.state.mu.Lock()
 	defer s.state.mu.Unlock()
 
-	songs := make([]string, 0, len(s.state.songs))
+	playlist := make([]PlaylistItem, 0, len(s.state.songs))
+	var startOffset time.Duration
 	for _, song := range s.state.songs {
-		songs = append(songs, song.Name)
+		startText := formatClock(startOffset)
+		durationText := formatClock(song.Duration)
+		playlist = append(playlist, PlaylistItem{
+			Name:     song.Name,
+			Start:    startText,
+			Duration: durationText,
+			Display:  fmt.Sprintf("[%s] %s", startText, song.Name),
+			// Display:  fmt.Sprintf("%s - %s [%s]", startText, song.Name, durationText),
+		})
+		startOffset += song.Duration
 	}
 
 	return Status{
 		IsRunning:   s.state.isRunning,
 		CurrentSong: s.state.currentSong,
-		Songs:       songs,
+		Songs:       playlist,
 	}
 }
 
@@ -206,7 +218,7 @@ func (s *Service) runStream(ctx context.Context, streamKey, videoFile, fontFile,
 		s.state.isRunning = false
 		s.state.currentSong = ""
 		s.state.nextSong = ""
-		s.state.shufflePlaylist = false
+		s.state.playlistOrder = ""
 		s.state.nowPlayingLabel = ""
 		s.state.nextSongLabel = ""
 		s.state.songs = nil
@@ -293,7 +305,7 @@ func (s *Service) runStream(ctx context.Context, streamKey, videoFile, fontFile,
 	}
 }
 
-func prepareAudioList(dir string, shuffle bool) ([]Song, error) {
+func prepareAudioList(dir string, playlistOrder string) ([]Song, error) {
 	var songs []Song
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -317,14 +329,54 @@ func prepareAudioList(dir string, shuffle bool) ([]Song, error) {
 		}
 	}
 
-	if shuffle && len(songs) > 1 {
+	sortSongsByOrder(songs, playlistOrder)
+
+	return songs, nil
+}
+
+func sortSongsByOrder(songs []Song, playlistOrder string) {
+	order := normalizePlaylistOrder(playlistOrder)
+
+	switch order {
+	case PlaylistOrderAZ:
+		sort.Slice(songs, func(i, j int) bool {
+			return strings.ToLower(songs[i].Name) < strings.ToLower(songs[j].Name)
+		})
+	case PlaylistOrderZA:
+		sort.Slice(songs, func(i, j int) bool {
+			return strings.ToLower(songs[i].Name) > strings.ToLower(songs[j].Name)
+		})
+	case PlaylistOrderShuffle:
 		rng := rand.New(rand.NewSource(time.Now().UnixNano()))
 		rng.Shuffle(len(songs), func(i, j int) {
 			songs[i], songs[j] = songs[j], songs[i]
 		})
+	case PlaylistOrderNormal:
+		// keep sequence as loaded from directory
 	}
+}
 
-	return songs, nil
+func normalizePlaylistOrder(order string) string {
+	switch strings.ToLower(strings.TrimSpace(order)) {
+	case PlaylistOrderAZ:
+		return PlaylistOrderAZ
+	case PlaylistOrderZA:
+		return PlaylistOrderZA
+	case PlaylistOrderShuffle:
+		return PlaylistOrderShuffle
+	default:
+		return PlaylistOrderNormal
+	}
+}
+
+func formatClock(d time.Duration) string {
+	if d < 0 {
+		d = 0
+	}
+	totalSec := int64(d.Seconds())
+	minutes := totalSec / 60
+	seconds := totalSec % 60
+	return fmt.Sprintf("%02d:%02d", minutes, seconds)
 }
 
 // getDuration uses ffprobe to get the exact duration of an audio file

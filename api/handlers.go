@@ -36,7 +36,7 @@ func (h *Handler) RegisterRoutes(app *fiber.App) {
 
 func (h *Handler) serveDashboard(c *fiber.Ctx) error {
 	c.Type("html", "utf-8")
-	return c.SendString(apphtml.RenderDashboard(h.serverMode))
+	return c.SendString(apphtml.Dashboard)
 }
 
 func (h *Handler) handleStatus(c *fiber.Ctx) error {
@@ -71,7 +71,7 @@ func (h *Handler) handleStopStream(c *fiber.Ctx) error {
 
 func (h *Handler) handleUpdatePlaylist(c *fiber.Ctx) error {
 	var req struct {
-		ShufflePlaylist *bool `json:"shufflePlaylist"`
+		PlaylistOrder *string `json:"playlistOrder"`
 	}
 
 	if len(c.Body()) > 0 {
@@ -80,7 +80,7 @@ func (h *Handler) handleUpdatePlaylist(c *fiber.Ctx) error {
 		}
 	}
 
-	count, err := h.streamService.UpdatePlaylist(req.ShufflePlaylist)
+	count, err := h.streamService.UpdatePlaylist(req.PlaylistOrder)
 	if err != nil {
 		if errors.Is(err, stream.ErrStreamNotRunning) {
 			return c.Status(fiber.StatusBadRequest).SendString("Stream is not running")

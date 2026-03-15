@@ -1,10 +1,5 @@
 package html
 
-import (
-	stdhtml "html"
-	"strings"
-)
-
 const Dashboard = `
 <!DOCTYPE html>
 <html lang="en">
@@ -18,10 +13,11 @@ const Dashboard = `
         .panel { background: white; border-radius: 12px; box-shadow: 0 6px 20px rgba(0,0,0,0.08); border: 1px solid #e8ebef; }
         .sidebar { padding: 22px; }
         .content { padding: 24px; }
-        h1 { margin: 0 0 14px; color: #222; font-size: 28px; }
+        h1 { margin: 0 0 14px; color: #222; font-size: 1.5em; }
         .subtitle { margin: 0 0 10px; color: #5e6672; font-size: 14px; }
         label { font-weight: bold; display: block; margin-top: 13px; margin-bottom: 5px; }
         input[type="text"] { width: 100%; padding: 10px; border: 1px solid #cfd6df; border-radius: 6px; box-sizing: border-box; }
+        select { width: 100%; padding: 10px; border: 1px solid #cfd6df; border-radius: 6px; box-sizing: border-box; background: white; }
         .checkbox-row { display: flex; align-items: center; gap: 8px; margin-top: 14px; }
         .checkbox-row label { margin: 0; font-weight: 600; cursor: pointer; }
         .btn { padding: 12px 20px; border: none; border-radius: 6px; cursor: pointer; font-size: 15px; font-weight: bold; color: white; transition: 0.2s; }
@@ -80,21 +76,24 @@ const Dashboard = `
         <div class="sidebar-body" id="sidebarBody">
         <div id="inputsPanel">
         <label for="streamKey">YouTube Stream Key</label>
-        <input type="text" id="streamKey" value="__DEFAULT_STREAM_KEY__" placeholder="xxxx-xxxx-xxxx-xxxx">
+        <input type="text" id="streamKey" value="" placeholder="xxxx-xxxx-xxxx-xxxx">
 
         <label for="videoPath">Background Video Path</label>
-        <input type="text" id="videoPath" value="__DEFAULT_VIDEO_PATH__" placeholder="C:\\videos\\loop.mp4 or ./loop.mp4">
+        <input type="text" id="videoPath" value="" placeholder="C:\\videos\\loop.mp4 or ./loop.mp4">
 
         <label for="audioDir">Audio Directory</label>
-        <input type="text" id="audioDir" value="__DEFAULT_AUDIO_DIR__" placeholder="C:\\music or ./music">
+        <input type="text" id="audioDir" value="" placeholder="C:\\music or ./music">
 
-        <div class="checkbox-row">
-            <input type="checkbox" id="shufflePlaylist">
-            <label for="shufflePlaylist">Shuffle Playlist</label>
-        </div>
+        <label for="playlistOrder">Playlist Order</label>
+        <select id="playlistOrder">
+            <option value="normal">normal</option>
+            <option value="a-z">a - z</option>
+            <option value="z-a">z - a</option>
+            <option value="shuffle">shuffle</option>
+        </select>
 
         <label for="fontPath">Font File Path</label>
-        <input type="text" id="fontPath" value="__DEFAULT_FONT_PATH__" placeholder="font.ttf">
+        <input type="text" id="fontPath" value="" placeholder="font.ttf">
 
         <label for="textX">Now Playing Text X</label>
         <input type="text" id="textX" value="30" placeholder="30 or w-tw-30">
@@ -142,7 +141,7 @@ const Dashboard = `
     document.addEventListener('DOMContentLoaded', async function() {
         initSidebar();
         await loadSettings();
-        document.getElementById('inputsPanel').querySelectorAll('input').forEach(function(el) {
+        document.getElementById('inputsPanel').querySelectorAll('input, select').forEach(function(el) {
             el.addEventListener('input', scheduleSettingsSave);
             el.addEventListener('change', scheduleSettingsSave);
         });
@@ -173,7 +172,7 @@ const Dashboard = `
             document.getElementById('streamKey').value = s.stream_key || '';
             document.getElementById('videoPath').value = s.video_path || '';
             document.getElementById('audioDir').value  = s.audio_dir  || '';
-            document.getElementById('shufflePlaylist').checked = !!s.shuffle_playlist;
+            document.getElementById('playlistOrder').value = s.playlist_order || (s.shuffle_playlist ? 'shuffle' : 'normal');
             document.getElementById('fontPath').value  = s.font_path  || '';
             document.getElementById('textX').value     = s.text_x     || '30';
             document.getElementById('textY').value     = s.text_y     || 'h-th-30';
@@ -194,7 +193,7 @@ const Dashboard = `
             stream_key:        document.getElementById('streamKey').value,
             video_path:        document.getElementById('videoPath').value,
             audio_dir:         document.getElementById('audioDir').value,
-            shuffle_playlist:  document.getElementById('shufflePlaylist').checked,
+            playlist_order:    document.getElementById('playlistOrder').value,
             font_path:         document.getElementById('fontPath').value,
             text_x:            document.getElementById('textX').value,
             text_y:            document.getElementById('textY').value,
@@ -265,9 +264,9 @@ const Dashboard = `
     }
 
     function setInputsDisabled(container, disabled) {
-        const fields = container.querySelectorAll('input');
+        const fields = container.querySelectorAll('input, select');
         for (const field of fields) {
-            if (field.id === 'shufflePlaylist') {
+            if (field.id === 'playlistOrder') {
                 field.disabled = false;
                 continue;
             }
@@ -290,8 +289,8 @@ const Dashboard = `
 
         for (const song of songs) {
             const item = document.createElement('li');
-            item.innerText = song;
-            if (song === currentSong) {
+            item.innerText = song.display || (song.name || '');
+            if ((song.name || '') === currentSong) {
                 item.classList.add('playing');
             }
             songList.appendChild(item);
@@ -303,7 +302,7 @@ const Dashboard = `
             streamKey: document.getElementById('streamKey').value,
             videoPath: document.getElementById('videoPath').value,
             audioDir: document.getElementById('audioDir').value,
-            shufflePlaylist: document.getElementById('shufflePlaylist').checked,
+            playlistOrder: document.getElementById('playlistOrder').value,
             fontPath: document.getElementById('fontPath').value,
             textX: document.getElementById('textX').value,
             textY: document.getElementById('textY').value,
@@ -346,7 +345,7 @@ const Dashboard = `
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    shufflePlaylist: document.getElementById('shufflePlaylist').checked
+                    playlistOrder: document.getElementById('playlistOrder').value
                 })
             });
             if (!res.ok) {
@@ -369,28 +368,3 @@ const Dashboard = `
 </body>
 </html>
 `
-
-func RenderDashboard(serverMode string) string {
-	isDev := strings.EqualFold(strings.TrimSpace(serverMode), "dev")
-
-	defaultStreamKey := ""
-	defaultVideoPath := ""
-	defaultAudioDir := ""
-	defaultFontPath := ""
-
-	if isDev {
-		defaultStreamKey = "test"
-		defaultVideoPath = `E:\Live-Stream\test\video\TOP20-Video.mp4`
-		defaultAudioDir = `E:\Live-Stream\test\audio`
-		defaultFontPath = `E:\Live-Stream\resources\TiltNeon-Regular-VariableFont.ttf`
-	}
-
-	replacer := strings.NewReplacer(
-		"__DEFAULT_STREAM_KEY__", stdhtml.EscapeString(defaultStreamKey),
-		"__DEFAULT_VIDEO_PATH__", stdhtml.EscapeString(defaultVideoPath),
-		"__DEFAULT_AUDIO_DIR__", stdhtml.EscapeString(defaultAudioDir),
-		"__DEFAULT_FONT_PATH__", stdhtml.EscapeString(defaultFontPath),
-	)
-
-	return replacer.Replace(Dashboard)
-}
