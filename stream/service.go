@@ -24,10 +24,10 @@ var ErrNoSongsFound = errors.New("no mp3 files found in directory")
 
 type Service struct {
 	state *StreamState
-	cfg   config.AppConfig
+	cfg   *config.AppConfig
 }
 
-func NewService(cfg config.AppConfig) *Service {
+func NewService(cfg *config.AppConfig) *Service {
 	return &Service{state: &StreamState{}, cfg: cfg}
 }
 
@@ -74,12 +74,20 @@ func (s *Service) Start(req StartRequest) error {
 	videoBitrate := defaultString(req.VideoBitrate, "6000k")
 	videoMaxRate := defaultString(req.VideoMaxRate, "6000k")
 	videoBufSize := defaultString(req.VideoBufSize, "12000k")
+	streamEndMode := normalizeStreamEndMode(req.StreamEndMode)
+	endAfter := parseEndAfterMinutes(req.EndAfterMinutes)
+
+	s.state.mu.Lock()
+	s.state.streamEndMode = streamEndMode
+	s.state.endAfter = endAfter
+	s.state.startedAt = time.Now()
+	s.state.mu.Unlock()
 
 	go s.runStream(ctx, req.StreamKey, req.VideoPath, req.FontPath, textX, textY, videoCodec, videoPreset, videoBitrate, videoMaxRate, videoBufSize)
 	return nil
 }
 
-func (s *Service) UpdatePlaylist(orderOverride *string) (int, error) {
+func (s *Service) UpdatePlaylist(orderOverride, audioDirOverride, streamEndModeOverride, endAfterMinutesOverride *string) (int, error) {
 	s.state.mu.Lock()
 	if !s.state.isRunning {
 		s.state.mu.Unlock()
@@ -87,6 +95,18 @@ func (s *Service) UpdatePlaylist(orderOverride *string) (int, error) {
 	}
 	if orderOverride != nil {
 		s.state.playlistOrder = normalizePlaylistOrder(*orderOverride)
+	}
+	if audioDirOverride != nil {
+		audioDir := strings.TrimSpace(*audioDirOverride)
+		if audioDir != "" {
+			s.state.audioDir = audioDir
+		}
+	}
+	if streamEndModeOverride != nil {
+		s.state.streamEndMode = normalizeStreamEndMode(*streamEndModeOverride)
+	}
+	if endAfterMinutesOverride != nil {
+		s.state.endAfter = parseEndAfterMinutes(*endAfterMinutesOverride)
 	}
 	audioDir := s.state.audioDir
 	playlistOrder := s.state.playlistOrder
@@ -114,7 +134,6 @@ func (s *Service) UpdatePlaylist(orderOverride *string) (int, error) {
 func (s *Service) Stop() {
 	s.state.mu.Lock()
 	if s.state.isRunning && s.state.cancel != nil {
-		s.logln("Stopping stream via web interface...")
 		s.state.cancel()
 	}
 	s.state.mu.Unlock()
@@ -126,7 +145,8 @@ func (s *Service) Status() Status {
 
 	playlist := make([]PlaylistItem, 0, len(s.state.songs))
 	var startOffset time.Duration
-	for _, song := range s.state.songs {
+	songIndex := 0
+	for i, song := range s.state.songs {
 		startText := formatClock(startOffset)
 		durationText := formatClock(song.Duration)
 		playlist = append(playlist, PlaylistItem{
@@ -134,8 +154,10 @@ func (s *Service) Status() Status {
 			Start:    startText,
 			Duration: durationText,
 			Display:  fmt.Sprintf("[%s] %s", startText, song.Name),
-			// Display:  fmt.Sprintf("%s - %s [%s]", startText, song.Name, durationText),
 		})
+		if song.Name == s.state.currentSong {
+			songIndex = i + 1
+		}
 		startOffset += song.Duration
 	}
 
@@ -143,19 +165,31 @@ func (s *Service) Status() Status {
 		IsRunning:   s.state.isRunning,
 		CurrentSong: s.state.currentSong,
 		Songs:       playlist,
+		StartedAt:   s.state.startedAt,
+		SongIndex:   songIndex,
+		SongTotal:   len(s.state.songs),
 	}
 }
 
 func (s *Service) StreamAudio(w *bufio.Writer) error {
 	for {
 		s.state.mu.Lock()
-		songs := s.state.songs
+		songs := append([]Song(nil), s.state.songs...)
 		isRunning := s.state.isRunning
 		nowPlayingLabel := s.state.nowPlayingLabel
 		nextSongLabel := s.state.nextSongLabel
+		streamEndMode := s.state.streamEndMode
+		endAfter := s.state.endAfter
+		startedAt := s.state.startedAt
 		s.state.mu.Unlock()
 
 		if !isRunning {
+			return nil
+		}
+
+		if streamEndMode == StreamEndDuration && endAfter > 0 && time.Since(startedAt) >= endAfter {
+			s.logln("Configured stream duration reached. Stopping stream.")
+			s.Stop()
 			return nil
 		}
 
@@ -165,6 +199,12 @@ func (s *Service) StreamAudio(w *bufio.Writer) error {
 		}
 
 		for idx, song := range songs {
+			if streamEndMode == StreamEndDuration && endAfter > 0 && time.Since(startedAt) >= endAfter {
+				s.logln("Configured stream duration reached. Stopping stream.")
+				s.Stop()
+				return nil
+			}
+
 			nextSongName := songs[(idx+1)%len(songs)].Name
 
 			s.state.mu.Lock()
@@ -217,6 +257,12 @@ func (s *Service) StreamAudio(w *bufio.Writer) error {
 				return err
 			}
 		}
+
+		if streamEndMode == StreamEndAllSongs {
+			s.logln("All songs have been played once. Stopping stream.")
+			s.Stop()
+			return nil
+		}
 	}
 }
 
@@ -227,6 +273,9 @@ func (s *Service) runStream(ctx context.Context, streamKey, videoFile, fontFile,
 		s.state.currentSong = ""
 		s.state.nextSong = ""
 		s.state.playlistOrder = ""
+		s.state.streamEndMode = ""
+		s.state.endAfter = 0
+		s.state.startedAt = time.Time{}
 		s.state.nowPlayingLabel = ""
 		s.state.nextSongLabel = ""
 		s.state.songs = nil
@@ -481,4 +530,29 @@ func defaultString(value, fallback string) string {
 		return fallback
 	}
 	return trimmed
+}
+
+func normalizeStreamEndMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case StreamEndDuration:
+		return StreamEndDuration
+	case StreamEndAllSongs:
+		return StreamEndAllSongs
+	default:
+		return StreamEndForever
+	}
+}
+
+func parseEndAfterMinutes(value string) time.Duration {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return 60 * time.Minute
+	}
+
+	minutes, err := strconv.Atoi(trimmed)
+	if err != nil || minutes <= 0 {
+		return 60 * time.Minute
+	}
+
+	return time.Duration(minutes) * time.Minute
 }

@@ -88,16 +88,36 @@ const Dashboard = `
         <label for="streamKey">YouTube Stream Key</label>
         <input type="text" id="streamKey" value="" placeholder="xxxx-xxxx-xxxx-xxxx">
 
-        <label for="audioDir">Audio Directory</label>
-        <input type="text" id="audioDir" value="" placeholder="C:\\music or ./music">
+        <div class="row-2" style="margin-top: 12px;">
+            <div class="field">
+                <label for="audioDir">Audio Directory</label>
+                <input type="text" id="audioDir" value="" placeholder="C:\\music or ./music">
+            </div>
+            <div class="field">
+                <label for="playlistOrder">Playlist Order</label>
+                <select id="playlistOrder" style="height: 37px;">
+                    <option value="normal">normal</option>
+                    <option value="a-z">a - z</option>
+                    <option value="z-a">z - a</option>
+                    <option value="shuffle">shuffle</option>
+                </select>
+            </div>
+        </div>
 
-        <label for="playlistOrder">Playlist Order</label>
-        <select id="playlistOrder">
-            <option value="normal">normal</option>
-            <option value="a-z">a - z</option>
-            <option value="z-a">z - a</option>
-            <option value="shuffle">shuffle</option>
-        </select>
+        <div class="row-2" style="margin-top: 12px;">
+            <div class="field">
+                <label for="streamEndMode">Stream End</label>
+                <select id="streamEndMode">
+                    <option value="forever">loop forever</option>
+                    <option value="duration">after a period</option>
+                    <option value="all_songs">all songs played</option>
+                </select>
+            </div>
+            <div class="field" id="endAfterField">
+                <label for="endAfterMinutes">Period (minutes)</label>
+                <input type="text" id="endAfterMinutes" value="60" placeholder="60">
+            </div>
+        </div>
 
         <details class="group" id="videoSettingsGroup" open>
             <summary>Video Settings</summary>
@@ -179,6 +199,7 @@ const Dashboard = `
     <div class="status-box" id="statusBox">
         <h3><span class="indicator" id="indicator"></span> <span id="statusText">Offline</span></h3>
         <p><strong>Now Playing:</strong> <span id="nowPlaying">-</span></p>
+        <p id="streamingMeta" style="margin: 6px 0 0; font-size: 13px; color: #5e6672;"></p>
     </div>
 
     <div class="playlist-box" id="playlistBox" style="display:none;">
@@ -193,6 +214,44 @@ const Dashboard = `
 
 <script>
     let saveSettingsTimer = null;
+    let streamingTimerInterval = null;
+    let streamStartedAt = null;
+    let streamSongIndex = 0;
+    let streamSongTotal = 0;
+
+    function updateStreamingMeta(startedAtStr, songIndex, songTotal) {
+        streamStartedAt = startedAtStr ? new Date(startedAtStr) : null;
+        streamSongIndex = songIndex || 0;
+        streamSongTotal = songTotal || 0;
+        if (!streamingTimerInterval) {
+            streamingTimerInterval = setInterval(tickStreamingClock, 1000);
+        }
+        tickStreamingClock();
+    }
+
+    function tickStreamingClock() {
+        const el = document.getElementById('streamingMeta');
+        if (!el) return;
+        const parts = [];
+        if (streamStartedAt) {
+            const elapsed = Math.floor((Date.now() - streamStartedAt.getTime()) / 1000);
+            const h = Math.floor(elapsed / 3600);
+            const m = Math.floor((elapsed % 3600) / 60);
+            const sc = elapsed % 60;
+            parts.push('\u23F1 ' + String(h).padStart(2,'0') + ':' + String(m).padStart(2,'0') + ':' + String(sc).padStart(2,'0'));
+        }
+        if (streamSongIndex > 0 && streamSongTotal > 0) {
+            parts.push('Song ' + streamSongIndex + ' / ' + streamSongTotal);
+        }
+        el.innerText = parts.join('  \u2022  ');
+    }
+
+    function stopStreamingClock() {
+        if (streamingTimerInterval) { clearInterval(streamingTimerInterval); streamingTimerInterval = null; }
+        streamStartedAt = null; streamSongIndex = 0; streamSongTotal = 0;
+        const el = document.getElementById('streamingMeta');
+        if (el) el.innerText = '';
+    }
 
     document.addEventListener('DOMContentLoaded', async function() {
         initSidebar();
@@ -201,6 +260,9 @@ const Dashboard = `
             el.addEventListener('input', scheduleSettingsSave);
             el.addEventListener('change', scheduleSettingsSave);
         });
+
+        document.getElementById('streamEndMode').addEventListener('change', updateEndAfterVisibility);
+        updateEndAfterVisibility();
     });
 
     function initSidebar() {
@@ -229,6 +291,8 @@ const Dashboard = `
             document.getElementById('videoPath').value = s.video_path || '';
             document.getElementById('audioDir').value  = s.audio_dir  || '';
             document.getElementById('playlistOrder').value = s.playlist_order || (s.shuffle_playlist ? 'shuffle' : 'normal');
+            document.getElementById('streamEndMode').value = s.stream_end_mode || 'forever';
+            document.getElementById('endAfterMinutes').value = s.end_after_minutes || '60';
             document.getElementById('fontPath').value  = s.font_path  || '';
             document.getElementById('videoCodec').value   = s.video_codec   || 'libx264';
             document.getElementById('videoPreset').value  = s.video_preset  || 'ultrafast';
@@ -239,9 +303,16 @@ const Dashboard = `
             document.getElementById('textY').value     = s.text_y     || 'h-th-30';
             document.getElementById('nowPlayingLabel').value = s.now_playing_label !== undefined ? s.now_playing_label : 'Now Playing:';
             document.getElementById('nextSongLabel').value   = s.next_song_label   !== undefined ? s.next_song_label   : 'Next song:';
+            updateEndAfterVisibility();
         } catch (e) {
             console.error('Failed to load settings', e);
         }
+    }
+
+    function updateEndAfterVisibility() {
+        const mode = document.getElementById('streamEndMode').value;
+        const show = mode === 'duration';
+        document.getElementById('endAfterField').style.display = show ? 'block' : 'none';
     }
 
     function scheduleSettingsSave() {
@@ -255,6 +326,8 @@ const Dashboard = `
             video_path:        document.getElementById('videoPath').value,
             audio_dir:         document.getElementById('audioDir').value,
             playlist_order:    document.getElementById('playlistOrder').value,
+            stream_end_mode:   document.getElementById('streamEndMode').value,
+            end_after_minutes: document.getElementById('endAfterMinutes').value,
             font_path:         document.getElementById('fontPath').value,
             video_codec:       document.getElementById('videoCodec').value,
             video_preset:      document.getElementById('videoPreset').value,
@@ -309,6 +382,7 @@ const Dashboard = `
                 statusBox.classList.add('running');
                 statusText.innerText = "Live / Streaming";
                 nowPlaying.innerText = data.currentSong || "Loading...";
+                updateStreamingMeta(data.startedAt, data.songIndex, data.songTotal);
                 startBtn.style.display = "none";
                 updateBtn.style.display = "block";
                 stopBtn.style.display = "block";
@@ -318,6 +392,7 @@ const Dashboard = `
                 statusBox.classList.remove('running');
                 statusText.innerText = "Offline";
                 nowPlaying.innerText = "-";
+                stopStreamingClock();
                 startBtn.style.display = "inline-block";
                 updateBtn.style.display = "none";
                 stopBtn.style.display = "none";
@@ -332,7 +407,7 @@ const Dashboard = `
     function setInputsDisabled(container, disabled) {
         const fields = container.querySelectorAll('input, select');
         for (const field of fields) {
-            if (field.id === 'playlistOrder') {
+            if (field.id === 'playlistOrder' || field.id === 'audioDir' || field.id === 'streamEndMode' || field.id === 'endAfterMinutes') {
                 field.disabled = false;
                 continue;
             }
@@ -369,6 +444,8 @@ const Dashboard = `
             videoPath: document.getElementById('videoPath').value,
             audioDir: document.getElementById('audioDir').value,
             playlistOrder: document.getElementById('playlistOrder').value,
+            streamEndMode: document.getElementById('streamEndMode').value,
+            endAfterMinutes: document.getElementById('endAfterMinutes').value,
             fontPath: document.getElementById('fontPath').value,
             videoCodec: document.getElementById('videoCodec').value,
             videoPreset: document.getElementById('videoPreset').value,
@@ -416,7 +493,10 @@ const Dashboard = `
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    playlistOrder: document.getElementById('playlistOrder').value
+                    playlistOrder: document.getElementById('playlistOrder').value,
+                    audioDir: document.getElementById('audioDir').value,
+                    streamEndMode: document.getElementById('streamEndMode').value,
+                    endAfterMinutes: document.getElementById('endAfterMinutes').value
                 })
             });
             if (!res.ok) {

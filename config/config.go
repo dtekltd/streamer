@@ -15,10 +15,10 @@ type AppConfig struct {
 	EnableLogging     bool
 }
 
-func Load() AppConfig {
+func Load() *AppConfig {
 	loadDotEnv(".env")
 
-	cfg := AppConfig{
+	cfg := &AppConfig{
 		ServerMode:        normalizeAppMode(getEnv("SERVER_MODE", "prod")),
 		ServerPort:        getEnv("SERVER_PORT", "8080"),
 		StreamURLTemplate: getEnv("STREAM_URL_TEMPLATE", "rtmp://10.16.0.165:1935/live/%s"),

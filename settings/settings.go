@@ -16,6 +16,8 @@ type DashboardSettings struct {
 	VideoPath       string `yaml:"video_path"        json:"video_path"`
 	AudioDir        string `yaml:"audio_dir"         json:"audio_dir"`
 	PlaylistOrder   string `yaml:"playlist_order"    json:"playlist_order"`
+	StreamEndMode   string `yaml:"stream_end_mode"   json:"stream_end_mode"`
+	EndAfterMinutes string `yaml:"end_after_minutes" json:"end_after_minutes"`
 	ShufflePlaylist bool   `yaml:"shuffle_playlist,omitempty"  json:"shuffle_playlist,omitempty"`
 	FontPath        string `yaml:"font_path"         json:"font_path"`
 	VideoCodec      string `yaml:"video_codec"       json:"video_codec"`

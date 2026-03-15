@@ -3,6 +3,7 @@ package api
 import (
 	"bufio"
 	"errors"
+	"fmt"
 
 	"streamer/config"
 	apphtml "streamer/html"
@@ -14,11 +15,11 @@ import (
 
 type Handler struct {
 	streamService *stream.Service
-	serverMode    string
+	cfg           *config.AppConfig
 }
 
-func NewHandler(cfg config.AppConfig) *Handler {
-	return &Handler{streamService: stream.NewService(cfg), serverMode: cfg.ServerMode}
+func NewHandler(cfg *config.AppConfig) *Handler {
+	return &Handler{streamService: stream.NewService(cfg), cfg: cfg}
 }
 
 func (h *Handler) RegisterRoutes(app *fiber.App) {
@@ -64,6 +65,9 @@ func (h *Handler) handleStartStream(c *fiber.Ctx) error {
 }
 
 func (h *Handler) handleStopStream(c *fiber.Ctx) error {
+	if h.cfg.EnableLogging {
+		fmt.Println("Stopping stream via web interface...")
+	}
 	h.streamService.Stop()
 
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{"message": "Stream stopping"})
@@ -71,7 +75,10 @@ func (h *Handler) handleStopStream(c *fiber.Ctx) error {
 
 func (h *Handler) handleUpdatePlaylist(c *fiber.Ctx) error {
 	var req struct {
-		PlaylistOrder *string `json:"playlistOrder"`
+		PlaylistOrder   *string `json:"playlistOrder"`
+		AudioDir        *string `json:"audioDir"`
+		StreamEndMode   *string `json:"streamEndMode"`
+		EndAfterMinutes *string `json:"endAfterMinutes"`
 	}
 
 	if len(c.Body()) > 0 {
@@ -80,7 +87,7 @@ func (h *Handler) handleUpdatePlaylist(c *fiber.Ctx) error {
 		}
 	}
 
-	count, err := h.streamService.UpdatePlaylist(req.PlaylistOrder)
+	count, err := h.streamService.UpdatePlaylist(req.PlaylistOrder, req.AudioDir, req.StreamEndMode, req.EndAfterMinutes)
 	if err != nil {
 		if errors.Is(err, stream.ErrStreamNotRunning) {
 			return c.Status(fiber.StatusBadRequest).SendString("Stream is not running")
