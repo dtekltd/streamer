@@ -34,7 +34,7 @@ const Dashboard = `
         .btn-row { margin-top: 16px; display: flex; gap: 10px; flex-wrap: wrap; }
         .btn-start { background-color: #28a745; min-width: 160px; }
         .btn-start:hover { background-color: #218838; }
-        .btn-update { background-color: #007bff; display: none; }
+        .btn-update { background-color: #007bff; }
         .btn-update:hover { background-color: #0069d9; }
         .btn-stop { background-color: #dc3545; display: none; }
         .btn-stop:hover { background-color: #c82333; }
@@ -59,6 +59,12 @@ const Dashboard = `
         .sidebar.collapsed .chevron { transform: rotate(-90deg); }
         .sidebar-body { overflow: hidden; transition: max-height 0.3s ease, opacity 0.25s ease; max-height: 2000px; opacity: 1; }
         .sidebar.collapsed .sidebar-body { max-height: 0; opacity: 0; }
+        .profile-row { display: grid; grid-template-columns: 1fr auto auto; gap: 8px; align-items: end; margin-top: 12px; }
+        .btn-mini { padding: 9px 10px; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 700; color: white; }
+        .btn-add { background: #198754; }
+        .btn-add:hover { background: #157347; }
+        .btn-delete { background: #c0392b; }
+        .btn-delete:hover { background: #a93226; }
 
         @media (max-width: 900px) {
             body { padding: 14px; }
@@ -87,6 +93,18 @@ const Dashboard = `
         <div id="inputsPanel">
         <label for="streamKey">YouTube Stream Key</label>
         <input type="text" id="streamKey" value="" placeholder="xxxx-xxxx-xxxx-xxxx">
+
+        <div class="profile-row">
+            <div class="field">
+                <label for="profileSelect">Profile</label>
+                <select id="profileSelect"></select>
+            </div>
+            <button type="button" class="btn-mini btn-add" id="addProfileBtn" onclick="addProfile()">+ Add</button>
+            <button type="button" class="btn-mini btn-delete" id="deleteProfileBtn" onclick="deleteProfile()">Delete</button>
+        </div>
+
+        <label for="profileName">Profile Name</label>
+        <input type="text" id="profileName" value="Default" placeholder="Profile name">
 
         <div class="row-2" style="margin-top: 12px;">
             <div class="field">
@@ -119,10 +137,7 @@ const Dashboard = `
             </div>
         </div>
 
-        <details class="group" id="videoSettingsGroup" open>
-            <summary>Video Settings</summary>
-            <div class="group-body">
-                <div class="field" style="margin-top: 12px;">
+        <div class="field" style="margin-top: 12px;">
                     <label for="videoPath">Background Video Path</label>
                     <input type="text" id="videoPath" value="" placeholder="C:\\videos\\loop.mp4 or ./loop.mp4">
                 </div>
@@ -132,6 +147,31 @@ const Dashboard = `
                     <input type="text" id="fontPath" value="" placeholder="font.ttf">
                 </div>
 
+                <div class="row-2" style="margin-top: 12px;">
+                    <div class="field">
+                        <label for="textX">Playing Text X</label>
+                        <input type="text" id="textX" value="30" placeholder="30 or w-tw-30">
+                    </div>
+                    <div class="field">
+                        <label for="textY">Playing Text Y</label>
+                        <input type="text" id="textY" value="h-th-30" placeholder="h-th-30 or 50">
+                    </div>
+                </div>
+
+                <div class="row-2">
+                    <div class="field">
+                        <label for="nowPlayingLabel">Playing Label</label>
+                        <input type="text" id="nowPlayingLabel" value="Now Playing:" placeholder="Now Playing:">
+                    </div>
+                    <div class="field">
+                        <label for="nextSongLabel">Next Label</label>
+                        <input type="text" id="nextSongLabel" value="Next song:" placeholder="Leave empty to hide">
+                    </div>
+                </div>
+
+        <details class="group" id="videoSettingsGroup" >
+            <summary>Video Settings</summary>
+            <div class="group-body">
                 <div class="row-2" style="margin-top: 12px;">
                     <div class="field">
                         <label for="videoCodec">Codec (-c:v)</label>
@@ -158,28 +198,6 @@ const Dashboard = `
                     <label for="videoBufSize">Bufsize (-bufsize)</label>
                     <input type="text" id="videoBufSize" value="12000k" placeholder="12000k">
                 </div>
-
-                <div class="row-2" style="margin-top: 12px;">
-                    <div class="field">
-                        <label for="textX">Playing Text X</label>
-                        <input type="text" id="textX" value="30" placeholder="30 or w-tw-30">
-                    </div>
-                    <div class="field">
-                        <label for="textY">Playing Text Y</label>
-                        <input type="text" id="textY" value="h-th-30" placeholder="h-th-30 or 50">
-                    </div>
-                </div>
-
-                <div class="row-2">
-                    <div class="field">
-                        <label for="nowPlayingLabel">Playing Label</label>
-                        <input type="text" id="nowPlayingLabel" value="Now Playing:" placeholder="Now Playing:">
-                    </div>
-                    <div class="field">
-                        <label for="nextSongLabel">Next Label</label>
-                        <input type="text" id="nextSongLabel" value="Next song:" placeholder="Leave empty to hide">
-                    </div>
-                </div>
             </div>
         </details>
         </div>
@@ -191,8 +209,8 @@ const Dashboard = `
         <p class="subtitle">Start and monitor stream from here.</p>
 
     <div class="btn-row">
-        <button class="btn btn-start" id="startBtn" onclick="startStream()">Start Stream</button>
-        <button class="btn btn-update" id="updateBtn" onclick="updatePlaylist()">Scan Folder & Update Playlist</button>
+        <button class="btn btn-start" id="startBtn" onclick="startStream()">Start Live Stream</button>
+        <button class="btn btn-update" id="updateBtn" onclick="updatePlaylist()">Update Playlist</button>
         <button class="btn btn-stop" id="stopBtn" onclick="stopStream()">Stop Stream</button>
     </div>
 
@@ -218,6 +236,177 @@ const Dashboard = `
     let streamStartedAt = null;
     let streamSongIndex = 0;
     let streamSongTotal = 0;
+    let isStreaming = false;
+    let previewSongs = [];
+    const DEFAULT_PROFILE_ID = 'default';
+    let profileState = {
+        selectedProfile: DEFAULT_PROFILE_ID,
+        profiles: [
+            {
+                id: DEFAULT_PROFILE_ID,
+                name: 'Default',
+                audio_dir: '',
+                playlist_order: 'normal',
+                stream_end_mode: 'forever',
+                end_after_minutes: '60',
+                video_path: '',
+                font_path: '',
+                text_x: '30',
+                text_y: 'h-th-30',
+                now_playing_label: 'Now Playing:',
+                next_song_label: 'Next song:'
+            }
+        ]
+    };
+
+    function defaultProfileFromLegacy(legacy) {
+        return {
+            id: DEFAULT_PROFILE_ID,
+            name: 'Default',
+            audio_dir: legacy.audio_dir || '',
+            playlist_order: legacy.playlist_order || 'normal',
+            stream_end_mode: legacy.stream_end_mode || 'forever',
+            end_after_minutes: legacy.end_after_minutes || '60',
+            video_path: legacy.video_path || '',
+            font_path: legacy.font_path || '',
+            text_x: legacy.text_x || '30',
+            text_y: legacy.text_y || 'h-th-30',
+            now_playing_label: legacy.now_playing_label !== undefined ? legacy.now_playing_label : 'Now Playing:',
+            next_song_label: legacy.next_song_label !== undefined ? legacy.next_song_label : 'Next song:'
+        };
+    }
+
+    function normalizeProfiles(rawProfiles, legacy) {
+        const normalized = [];
+        const seen = new Set();
+        if (Array.isArray(rawProfiles)) {
+            for (const raw of rawProfiles) {
+                if (!raw) continue;
+                const id = String(raw.id || '').trim();
+                if (!id || seen.has(id)) continue;
+                seen.add(id);
+                normalized.push({
+                    id,
+                    name: String(raw.name || '').trim() || (id === DEFAULT_PROFILE_ID ? 'Default' : 'Profile'),
+                    audio_dir: String(raw.audio_dir || ''),
+                    playlist_order: String(raw.playlist_order || 'normal'),
+                    stream_end_mode: String(raw.stream_end_mode || 'forever'),
+                    end_after_minutes: String(raw.end_after_minutes || '60'),
+                    video_path: String(raw.video_path || ''),
+                    font_path: String(raw.font_path || ''),
+                    text_x: String(raw.text_x || '30'),
+                    text_y: String(raw.text_y || 'h-th-30'),
+                    now_playing_label: raw.now_playing_label !== undefined ? String(raw.now_playing_label) : 'Now Playing:',
+                    next_song_label: raw.next_song_label !== undefined ? String(raw.next_song_label) : 'Next song:'
+                });
+            }
+        }
+
+        if (!normalized.some(p => p.id === DEFAULT_PROFILE_ID)) {
+            normalized.unshift(defaultProfileFromLegacy(legacy));
+        }
+        return normalized;
+    }
+
+    function syncProfileState(rawProfiles, selectedProfile, legacy) {
+        profileState.profiles = normalizeProfiles(rawProfiles, legacy);
+        const selected = String(selectedProfile || DEFAULT_PROFILE_ID);
+        profileState.selectedProfile = profileState.profiles.some(p => p.id === selected) ? selected : DEFAULT_PROFILE_ID;
+        renderProfiles();
+        applySelectedProfileToForm();
+    }
+
+    function renderProfiles() {
+        const select = document.getElementById('profileSelect');
+        select.innerHTML = '';
+        for (const p of profileState.profiles) {
+            const option = document.createElement('option');
+            option.value = p.id;
+            option.text = p.name;
+            select.appendChild(option);
+        }
+        select.value = profileState.selectedProfile;
+
+        const active = getSelectedProfile();
+        document.getElementById('profileName').value = active ? active.name : 'Default';
+        document.getElementById('deleteProfileBtn').disabled = !active || active.id === DEFAULT_PROFILE_ID;
+    }
+
+    function getSelectedProfile() {
+        return profileState.profiles.find(p => p.id === profileState.selectedProfile) || null;
+    }
+
+    function applySelectedProfileToForm() {
+        const p = getSelectedProfile();
+        if (!p) return;
+        document.getElementById('audioDir').value = p.audio_dir || '';
+        document.getElementById('playlistOrder').value = p.playlist_order || 'normal';
+        document.getElementById('streamEndMode').value = p.stream_end_mode || 'forever';
+        document.getElementById('endAfterMinutes').value = p.end_after_minutes || '60';
+        document.getElementById('videoPath').value = p.video_path || '';
+        document.getElementById('fontPath').value = p.font_path || '';
+        document.getElementById('textX').value = p.text_x || '30';
+        document.getElementById('textY').value = p.text_y || 'h-th-30';
+        document.getElementById('nowPlayingLabel').value = p.now_playing_label !== undefined ? p.now_playing_label : 'Now Playing:';
+        document.getElementById('nextSongLabel').value = p.next_song_label !== undefined ? p.next_song_label : 'Next song:';
+        document.getElementById('profileName').value = p.name || 'Profile';
+        updateEndAfterVisibility();
+    }
+
+    function saveSelectedProfileFromForm() {
+        const p = getSelectedProfile();
+        if (!p) return;
+        p.name = String(document.getElementById('profileName').value || '').trim() || (p.id === DEFAULT_PROFILE_ID ? 'Default' : 'Profile');
+        p.audio_dir = document.getElementById('audioDir').value;
+        p.playlist_order = document.getElementById('playlistOrder').value;
+        p.stream_end_mode = document.getElementById('streamEndMode').value;
+        p.end_after_minutes = document.getElementById('endAfterMinutes').value;
+        p.video_path = document.getElementById('videoPath').value;
+        p.font_path = document.getElementById('fontPath').value;
+        p.text_x = document.getElementById('textX').value;
+        p.text_y = document.getElementById('textY').value;
+        p.now_playing_label = document.getElementById('nowPlayingLabel').value;
+        p.next_song_label = document.getElementById('nextSongLabel').value;
+    }
+
+    function addProfile() {
+        saveSelectedProfileFromForm();
+        const id = 'profile-' + Date.now();
+        profileState.profiles.push({
+            id,
+            name: 'Profile ' + profileState.profiles.length,
+            audio_dir: '',
+            playlist_order: 'normal',
+            stream_end_mode: 'forever',
+            end_after_minutes: '60',
+            video_path: '',
+            font_path: '',
+            text_x: '30',
+            text_y: 'h-th-30',
+            now_playing_label: 'Now Playing:',
+            next_song_label: 'Next song:'
+        });
+        profileState.selectedProfile = id;
+        renderProfiles();
+        applySelectedProfileToForm();
+        scheduleSettingsSave();
+    }
+
+    function deleteProfile() {
+        const current = getSelectedProfile();
+        if (!current || current.id === DEFAULT_PROFILE_ID) {
+            alert('Default profile cannot be deleted.');
+            return;
+        }
+        if (!confirm('Delete profile "' + current.name + '"?')) {
+            return;
+        }
+        profileState.profiles = profileState.profiles.filter(p => p.id !== current.id);
+        profileState.selectedProfile = DEFAULT_PROFILE_ID;
+        renderProfiles();
+        applySelectedProfileToForm();
+        scheduleSettingsSave();
+    }
 
     function updateStreamingMeta(startedAtStr, songIndex, songTotal) {
         streamStartedAt = startedAtStr ? new Date(startedAtStr) : null;
@@ -255,6 +444,19 @@ const Dashboard = `
 
     document.addEventListener('DOMContentLoaded', async function() {
         initSidebar();
+        document.getElementById('profileSelect').addEventListener('change', function(e) {
+            saveSelectedProfileFromForm();
+            profileState.selectedProfile = e.target.value;
+            renderProfiles();
+            applySelectedProfileToForm();
+            scheduleSettingsSave();
+        });
+        document.getElementById('profileName').addEventListener('input', function() {
+            saveSelectedProfileFromForm();
+            renderProfiles();
+            scheduleSettingsSave();
+        });
+
         await loadSettings();
         document.getElementById('inputsPanel').querySelectorAll('input, select').forEach(function(el) {
             el.addEventListener('input', scheduleSettingsSave);
@@ -286,23 +488,27 @@ const Dashboard = `
             const res = await fetch('/api/settings');
             if (!res.ok) return;
             const s = await res.json();
-            if (!s.saved) return; // no settings saved yet — keep HTML defaults
+
+            const legacyProfile = {
+                audio_dir: s.audio_dir || '',
+                playlist_order: s.playlist_order || (s.shuffle_playlist ? 'shuffle' : 'normal'),
+                stream_end_mode: s.stream_end_mode || 'forever',
+                end_after_minutes: s.end_after_minutes || '60',
+                video_path: s.video_path || '',
+                font_path: s.font_path || '',
+                text_x: s.text_x || '30',
+                text_y: s.text_y || 'h-th-30',
+                now_playing_label: s.now_playing_label !== undefined ? s.now_playing_label : 'Now Playing:',
+                next_song_label: s.next_song_label !== undefined ? s.next_song_label : 'Next song:'
+            };
+
             document.getElementById('streamKey').value = s.stream_key || '';
-            document.getElementById('videoPath').value = s.video_path || '';
-            document.getElementById('audioDir').value  = s.audio_dir  || '';
-            document.getElementById('playlistOrder').value = s.playlist_order || (s.shuffle_playlist ? 'shuffle' : 'normal');
-            document.getElementById('streamEndMode').value = s.stream_end_mode || 'forever';
-            document.getElementById('endAfterMinutes').value = s.end_after_minutes || '60';
-            document.getElementById('fontPath').value  = s.font_path  || '';
             document.getElementById('videoCodec').value   = s.video_codec   || 'libx264';
             document.getElementById('videoPreset').value  = s.video_preset  || 'ultrafast';
             document.getElementById('videoBitrate').value = s.video_bitrate || '6000k';
             document.getElementById('videoMaxRate').value = s.video_maxrate || '6000k';
             document.getElementById('videoBufSize').value = s.video_bufsize || '12000k';
-            document.getElementById('textX').value     = s.text_x     || '30';
-            document.getElementById('textY').value     = s.text_y     || 'h-th-30';
-            document.getElementById('nowPlayingLabel').value = s.now_playing_label !== undefined ? s.now_playing_label : 'Now Playing:';
-            document.getElementById('nextSongLabel').value   = s.next_song_label   !== undefined ? s.next_song_label   : 'Next song:';
+            syncProfileState(s.profiles, s.selected_profile, legacyProfile);
             updateEndAfterVisibility();
         } catch (e) {
             console.error('Failed to load settings', e);
@@ -321,23 +527,28 @@ const Dashboard = `
     }
 
     async function saveSettings() {
+        saveSelectedProfileFromForm();
+        const activeProfile = getSelectedProfile() || defaultProfileFromLegacy({});
+
         const payload = {
+            selected_profile:  profileState.selectedProfile,
+            profiles:          profileState.profiles,
             stream_key:        document.getElementById('streamKey').value,
-            video_path:        document.getElementById('videoPath').value,
-            audio_dir:         document.getElementById('audioDir').value,
-            playlist_order:    document.getElementById('playlistOrder').value,
-            stream_end_mode:   document.getElementById('streamEndMode').value,
-            end_after_minutes: document.getElementById('endAfterMinutes').value,
-            font_path:         document.getElementById('fontPath').value,
+            video_path:        activeProfile.video_path,
+            audio_dir:         activeProfile.audio_dir,
+            playlist_order:    activeProfile.playlist_order,
+            stream_end_mode:   activeProfile.stream_end_mode,
+            end_after_minutes: activeProfile.end_after_minutes,
+            font_path:         activeProfile.font_path,
             video_codec:       document.getElementById('videoCodec').value,
             video_preset:      document.getElementById('videoPreset').value,
             video_bitrate:     document.getElementById('videoBitrate').value,
             video_maxrate:     document.getElementById('videoMaxRate').value,
             video_bufsize:     document.getElementById('videoBufSize').value,
-            text_x:            document.getElementById('textX').value,
-            text_y:            document.getElementById('textY').value,
-            now_playing_label: document.getElementById('nowPlayingLabel').value,
-            next_song_label:   document.getElementById('nextSongLabel').value
+            text_x:            activeProfile.text_x,
+            text_y:            activeProfile.text_y,
+            now_playing_label: activeProfile.now_playing_label,
+            next_song_label:   activeProfile.next_song_label
         };
         try {
             const res = await fetch('/api/settings', {
@@ -376,9 +587,17 @@ const Dashboard = `
             const inputsPanel = document.getElementById('inputsPanel');
             const playlistBox = document.getElementById('playlistBox');
 
-            renderSongList(data.songs || [], data.currentSong || "");
+            isStreaming = !!data.isRunning;
 
-            if (data.isRunning) {
+            if (isStreaming) {
+                renderSongList(data.songs || [], data.currentSong || "");
+            } else if (previewSongs.length > 0) {
+                renderSongList(previewSongs, "");
+            } else {
+                renderSongList([], "");
+            }
+
+            if (isStreaming) {
                 statusBox.classList.add('running');
                 statusText.innerText = "Live / Streaming";
                 nowPlaying.innerText = data.currentSong || "Loading...";
@@ -394,9 +613,9 @@ const Dashboard = `
                 nowPlaying.innerText = "-";
                 stopStreamingClock();
                 startBtn.style.display = "inline-block";
-                updateBtn.style.display = "none";
+                updateBtn.style.display = "inline-block";
                 stopBtn.style.display = "none";
-                playlistBox.style.display = "none";
+                playlistBox.style.display = previewSongs.length > 0 ? "block" : "none";
                 setInputsDisabled(inputsPanel, false);
             }
         } catch (e) {
@@ -412,6 +631,18 @@ const Dashboard = `
                 continue;
             }
             field.disabled = disabled;
+        }
+
+        if (disabled) {
+            document.getElementById('profileSelect').disabled = true;
+            document.getElementById('profileName').disabled = true;
+            document.getElementById('addProfileBtn').disabled = true;
+            document.getElementById('deleteProfileBtn').disabled = true;
+        } else {
+            document.getElementById('profileSelect').disabled = false;
+            document.getElementById('profileName').disabled = false;
+            document.getElementById('addProfileBtn').disabled = false;
+            renderProfiles();
         }
     }
 
@@ -439,6 +670,8 @@ const Dashboard = `
     }
 
     async function startStream() {
+        saveSelectedProfileFromForm();
+
         const payload = {
             streamKey: document.getElementById('streamKey').value,
             videoPath: document.getElementById('videoPath').value,
@@ -472,7 +705,7 @@ const Dashboard = `
         });
 
         setTimeout(fetchStatus, 500);
-        document.getElementById('startBtn').innerText = "Start Stream";
+        document.getElementById('startBtn').innerText = "Start Live Stream";
     }
 
     async function stopStream() {
@@ -486,10 +719,11 @@ const Dashboard = `
         const btn = document.getElementById('updateBtn');
         const originalText = btn.innerText;
         btn.disabled = true;
-        btn.innerText = "Scanning...";
+        btn.innerText = isStreaming ? "Updating..." : "Checking...";
 
         try {
-            const res = await fetch('/api/update-playlist', {
+            const endpoint = isStreaming ? '/api/update-playlist' : '/api/preview-playlist';
+            const res = await fetch(endpoint, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -505,7 +739,14 @@ const Dashboard = `
             }
 
             const data = await res.json();
-            alert("Playlist updated. " + data.songs + " songs loaded.");
+            if (!isStreaming) {
+                previewSongs = data.playlist || [];
+                renderSongList(previewSongs, "");
+                document.getElementById('playlistBox').style.display = previewSongs.length > 0 ? 'block' : 'none';
+                alert("Playlist checked. " + data.songs + " songs ready for live stream.");
+            } else {
+                alert("Playlist updated. " + data.songs + " songs loaded.");
+            }
             await fetchStatus();
         } catch (e) {
             alert("Failed to update playlist: " + e.message);

@@ -131,6 +131,37 @@ func (s *Service) UpdatePlaylist(orderOverride, audioDirOverride, streamEndModeO
 	return len(songs), nil
 }
 
+func (s *Service) PreviewPlaylist(audioDir, playlistOrder string) ([]PlaylistItem, error) {
+	cleanDir := strings.TrimSpace(audioDir)
+	if cleanDir == "" {
+		return nil, errors.New("audio directory is required")
+	}
+
+	songs, err := prepareAudioList(cleanDir, normalizePlaylistOrder(playlistOrder))
+	if err != nil {
+		return nil, err
+	}
+	if len(songs) == 0 {
+		return nil, ErrNoSongsFound
+	}
+
+	playlist := make([]PlaylistItem, 0, len(songs))
+	var startOffset time.Duration
+	for _, song := range songs {
+		startText := formatClock(startOffset)
+		durationText := formatClock(song.Duration)
+		playlist = append(playlist, PlaylistItem{
+			Name:     song.Name,
+			Start:    startText,
+			Duration: durationText,
+			Display:  fmt.Sprintf("[%s] %s", startText, song.Name),
+		})
+		startOffset += song.Duration
+	}
+
+	return playlist, nil
+}
+
 func (s *Service) Stop() {
 	s.state.mu.Lock()
 	if s.state.isRunning && s.state.cancel != nil {

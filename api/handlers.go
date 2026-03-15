@@ -31,23 +31,49 @@ func (h *Handler) AutoStartFromSavedSettings() error {
 		return errors.New("no saved settings found")
 	}
 
+	audioDir := saved.AudioDir
+	playlistOrder := saved.PlaylistOrder
+	streamEndMode := saved.StreamEndMode
+	endAfterMinutes := saved.EndAfterMinutes
+	videoPath := saved.VideoPath
+	fontPath := saved.FontPath
+	textX := saved.TextX
+	textY := saved.TextY
+	nowPlayingLabel := saved.NowPlayingLabel
+	nextSongLabel := saved.NextSongLabel
+	for _, p := range saved.Profiles {
+		if p.ID == saved.SelectedProfile {
+			audioDir = p.AudioDir
+			playlistOrder = p.PlaylistOrder
+			streamEndMode = p.StreamEndMode
+			endAfterMinutes = p.EndAfterMinutes
+			videoPath = p.VideoPath
+			fontPath = p.FontPath
+			textX = p.TextX
+			textY = p.TextY
+			nowPlayingLabel = p.NowPlayingLabel
+			nextSongLabel = p.NextSongLabel
+			break
+		}
+	}
+
 	req := stream.StartRequest{
 		StreamKey:       saved.StreamKey,
-		VideoPath:       saved.VideoPath,
-		AudioDir:        saved.AudioDir,
-		PlaylistOrder:   saved.PlaylistOrder,
-		StreamEndMode:   saved.StreamEndMode,
-		EndAfterMinutes: saved.EndAfterMinutes,
-		FontPath:        saved.FontPath,
+		VideoPath:       videoPath,
+		AudioDir:        audioDir,
+		PlaylistOrder:   playlistOrder,
+		StreamEndMode:   streamEndMode,
+		EndAfterMinutes: endAfterMinutes,
+		FontPath:        fontPath,
 		VideoCodec:      saved.VideoCodec,
 		VideoPreset:     saved.VideoPreset,
 		VideoBitrate:    saved.VideoBitrate,
 		VideoMaxRate:    saved.VideoMaxRate,
 		VideoBufSize:    saved.VideoBufSize,
-		TextX:           saved.TextX,
-		TextY:           saved.TextY,
-		NowPlayingLabel: saved.NowPlayingLabel,
-		NextSongLabel:   saved.NextSongLabel,
+		TextX:           textX,
+		TextY:           textY,
+		NowPlayingLabel: nowPlayingLabel,
+		NextSongLabel:   nextSongLabel,
 	}
 
 	if req.StreamKey == "" || req.VideoPath == "" || req.AudioDir == "" || req.FontPath == "" {
@@ -64,6 +90,7 @@ func (h *Handler) RegisterRoutes(app *fiber.App) {
 	api := app.Group("/api")
 	api.Post("/start", h.handleStartStream)
 	api.Post("/stop", h.handleStopStream)
+	api.Post("/preview-playlist", h.handlePreviewPlaylist)
 	api.Post("/update-playlist", h.handleUpdatePlaylist)
 	api.Get("/status", h.handleStatus)
 	api.Get("/settings", h.handleGetSettings)
@@ -134,6 +161,31 @@ func (h *Handler) handleUpdatePlaylist(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(fiber.Map{"message": "Playlist updated", "songs": count})
+}
+
+func (h *Handler) handlePreviewPlaylist(c *fiber.Ctx) error {
+	var req struct {
+		PlaylistOrder string `json:"playlistOrder"`
+		AudioDir      string `json:"audioDir"`
+	}
+
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).SendString(err.Error())
+	}
+
+	playlist, err := h.streamService.PreviewPlaylist(req.AudioDir, req.PlaylistOrder)
+	if err != nil {
+		if errors.Is(err, stream.ErrNoSongsFound) {
+			return c.Status(fiber.StatusBadRequest).SendString("No MP3 files found in the audio directory")
+		}
+		return c.Status(fiber.StatusBadRequest).SendString(err.Error())
+	}
+
+	return c.JSON(fiber.Map{
+		"message":  "Playlist preview ready",
+		"songs":    len(playlist),
+		"playlist": playlist,
+	})
 }
 
 func (h *Handler) handleInternalAudio(c *fiber.Ctx) error {
