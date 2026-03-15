@@ -22,6 +22,41 @@ func NewHandler(cfg *config.AppConfig) *Handler {
 	return &Handler{streamService: stream.NewService(cfg), cfg: cfg}
 }
 
+func (h *Handler) AutoStartFromSavedSettings() error {
+	saved, err := settings.Load()
+	if err != nil {
+		return err
+	}
+	if !saved.Saved {
+		return errors.New("no saved settings found")
+	}
+
+	req := stream.StartRequest{
+		StreamKey:       saved.StreamKey,
+		VideoPath:       saved.VideoPath,
+		AudioDir:        saved.AudioDir,
+		PlaylistOrder:   saved.PlaylistOrder,
+		StreamEndMode:   saved.StreamEndMode,
+		EndAfterMinutes: saved.EndAfterMinutes,
+		FontPath:        saved.FontPath,
+		VideoCodec:      saved.VideoCodec,
+		VideoPreset:     saved.VideoPreset,
+		VideoBitrate:    saved.VideoBitrate,
+		VideoMaxRate:    saved.VideoMaxRate,
+		VideoBufSize:    saved.VideoBufSize,
+		TextX:           saved.TextX,
+		TextY:           saved.TextY,
+		NowPlayingLabel: saved.NowPlayingLabel,
+		NextSongLabel:   saved.NextSongLabel,
+	}
+
+	if req.StreamKey == "" || req.VideoPath == "" || req.AudioDir == "" || req.FontPath == "" {
+		return errors.New("saved settings are incomplete: stream key, video path, audio directory, and font path are required")
+	}
+
+	return h.streamService.Start(req)
+}
+
 func (h *Handler) RegisterRoutes(app *fiber.App) {
 	app.Get("/", h.serveDashboard)
 	app.Get("/internal/audio", h.handleInternalAudio)
