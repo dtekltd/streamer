@@ -69,7 +69,13 @@ func (s *Service) Start(req StartRequest) error {
 		textY = "h-th-30"
 	}
 
-	go s.runStream(ctx, req.StreamKey, req.VideoPath, req.FontPath, textX, textY)
+	videoCodec := defaultString(req.VideoCodec, "libx264")
+	videoPreset := defaultString(req.VideoPreset, "ultrafast")
+	videoBitrate := defaultString(req.VideoBitrate, "6000k")
+	videoMaxRate := defaultString(req.VideoMaxRate, "6000k")
+	videoBufSize := defaultString(req.VideoBufSize, "12000k")
+
+	go s.runStream(ctx, req.StreamKey, req.VideoPath, req.FontPath, textX, textY, videoCodec, videoPreset, videoBitrate, videoMaxRate, videoBufSize)
 	return nil
 }
 
@@ -197,12 +203,14 @@ func (s *Service) StreamAudio(w *bufio.Writer) error {
 			}
 
 			// Look at the stopwatch. Wait out the remaining length of the song,
-			// minus a 3-second padding to keep FFmpeg's buffer fed!
+			// minus a second padding to keep FFmpeg's buffer fed!
 			elapsed := time.Since(start)
-			bufferPadding := 3 * time.Second
+			bufferPadding := 1 * time.Second
 
 			if elapsed+bufferPadding < song.Duration {
-				time.Sleep(song.Duration - elapsed - bufferPadding)
+				remaining := song.Duration - elapsed - bufferPadding
+				// s.logf("Sleep %v until fed next song...\n", remaining)
+				time.Sleep(remaining)
 			}
 
 			if err := w.Flush(); err != nil {
@@ -212,7 +220,7 @@ func (s *Service) StreamAudio(w *bufio.Writer) error {
 	}
 }
 
-func (s *Service) runStream(ctx context.Context, streamKey, videoFile, fontFile, textX, textY string) {
+func (s *Service) runStream(ctx context.Context, streamKey, videoFile, fontFile, textX, textY, videoCodec, videoPreset, videoBitrate, videoMaxRate, videoBufSize string) {
 	defer func() {
 		s.state.mu.Lock()
 		s.state.isRunning = false
@@ -272,7 +280,7 @@ func (s *Service) runStream(ctx context.Context, streamKey, videoFile, fontFile,
 		"-filter_complex", combinedFilter,
 		"-map", "[v]",
 		"-map", "1:a",
-		"-c:v", "libx264",
+		"-c:v", videoCodec,
 		// "-preset", "veryfast",
 		// // "-b:v", "3000k",
 		// // "-maxrate", "3000k",
@@ -280,10 +288,10 @@ func (s *Service) runStream(ctx context.Context, streamKey, videoFile, fontFile,
 		// "-b:v", "13500k", // Set target bitrate to 13.5 Mbps
 		// "-maxrate", "13500k", // Cap the maximum bitrate at 13.5 Mbps
 		// "-bufsize", "27000k", // Set buffer size to double the maxrate (Standard practice)
-		"-preset", "ultrafast", // <-- Changed to ultrafast to save CPU power
-		"-b:v", "6000k", // <-- Lowered to 6 Mbps (Standard 1080p)
-		"-maxrate", "6000k",
-		"-bufsize", "12000k",
+		"-preset", videoPreset,
+		"-b:v", videoBitrate,
+		"-maxrate", videoMaxRate,
+		"-bufsize", videoBufSize,
 		"-pix_fmt", "yuv420p",
 		"-g", "50",
 		"-c:a", "aac",
@@ -465,4 +473,12 @@ func (s *Service) logln(msg string) {
 	if s.cfg.EnableLogging {
 		fmt.Println(msg)
 	}
+}
+
+func defaultString(value, fallback string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return fallback
+	}
+	return trimmed
 }

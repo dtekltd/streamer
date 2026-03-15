@@ -48,6 +48,11 @@ type StartRequest struct {
 	AudioDir        string `json:"audioDir"`
 	PlaylistOrder   string `json:"playlistOrder"`
 	FontPath        string `json:"fontPath"`
+	VideoCodec      string `json:"videoCodec"`
+	VideoPreset     string `json:"videoPreset"`
+	VideoBitrate    string `json:"videoBitrate"`
+	VideoMaxRate    string `json:"videoMaxRate"`
+	VideoBufSize    string `json:"videoBufSize"`
 	TextX           string `json:"textX"`
 	TextY           string `json:"textY"`
 	NowPlayingLabel string `json:"nowPlayingLabel"`

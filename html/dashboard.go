@@ -15,9 +15,18 @@ const Dashboard = `
         .content { padding: 24px; }
         h1 { margin: 0 0 14px; color: #222; font-size: 1.5em; }
         .subtitle { margin: 0 0 10px; color: #5e6672; font-size: 14px; }
-        label { font-weight: bold; display: block; margin-top: 13px; margin-bottom: 5px; }
+        label { font-weight: bold; font-size: 12px; display: block; margin-top: 13px; margin-bottom: 5px; }
         input[type="text"] { width: 100%; padding: 10px; border: 1px solid #cfd6df; border-radius: 6px; box-sizing: border-box; }
         select { width: 100%; padding: 10px; border: 1px solid #cfd6df; border-radius: 6px; box-sizing: border-box; background: white; }
+        .row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        .field { min-width: 0; }
+        .field label { margin-top: 0; }
+        .group { margin-top: 12px; border: 1px solid #e0e3e7; border-radius: 8px; background: #f8f9fb; }
+        .group > summary { list-style: none; cursor: pointer; padding: 10px 12px; font-weight: 700; color: #2e3440; display: flex; align-items: center; justify-content: space-between; }
+        .group > summary::-webkit-details-marker { display: none; }
+        .group > summary::after { content: "\25BE"; font-size: 12px; color: #6b7280; transition: transform 0.2s; }
+        .group[open] > summary::after { transform: rotate(180deg); }
+        .group-body { padding: 0 12px 12px; border-top: 1px solid #e8ebef; }
         .checkbox-row { display: flex; align-items: center; gap: 8px; margin-top: 14px; }
         .checkbox-row label { margin: 0; font-weight: 600; cursor: pointer; }
         .btn { padding: 12px 20px; border: none; border-radius: 6px; cursor: pointer; font-size: 15px; font-weight: bold; color: white; transition: 0.2s; }
@@ -56,6 +65,7 @@ const Dashboard = `
             .layout { grid-template-columns: 1fr; gap: 14px; }
             .sidebar, .content { padding: 18px; }
             h1 { font-size: 24px; }
+            .row-2 { grid-template-columns: 1fr; }
             .btn-row { flex-direction: column; }
             .btn-start, .btn-update, .btn-stop { width: 100%; }
         }
@@ -78,9 +88,6 @@ const Dashboard = `
         <label for="streamKey">YouTube Stream Key</label>
         <input type="text" id="streamKey" value="" placeholder="xxxx-xxxx-xxxx-xxxx">
 
-        <label for="videoPath">Background Video Path</label>
-        <input type="text" id="videoPath" value="" placeholder="C:\\videos\\loop.mp4 or ./loop.mp4">
-
         <label for="audioDir">Audio Directory</label>
         <input type="text" id="audioDir" value="" placeholder="C:\\music or ./music">
 
@@ -92,20 +99,69 @@ const Dashboard = `
             <option value="shuffle">shuffle</option>
         </select>
 
-        <label for="fontPath">Font File Path</label>
-        <input type="text" id="fontPath" value="" placeholder="font.ttf">
+        <details class="group" id="videoSettingsGroup" open>
+            <summary>Video Settings</summary>
+            <div class="group-body">
+                <div class="field" style="margin-top: 12px;">
+                    <label for="videoPath">Background Video Path</label>
+                    <input type="text" id="videoPath" value="" placeholder="C:\\videos\\loop.mp4 or ./loop.mp4">
+                </div>
 
-        <label for="textX">Now Playing Text X</label>
-        <input type="text" id="textX" value="30" placeholder="30 or w-tw-30">
+                <div class="field">
+                    <label for="fontPath">Font File Path</label>
+                    <input type="text" id="fontPath" value="" placeholder="font.ttf">
+                </div>
 
-        <label for="textY">Now Playing Text Y</label>
-        <input type="text" id="textY" value="h-th-30" placeholder="h-th-30 or 50">
+                <div class="row-2" style="margin-top: 12px;">
+                    <div class="field">
+                        <label for="videoCodec">Codec (-c:v)</label>
+                        <input type="text" id="videoCodec" value="libx264" placeholder="libx264">
+                    </div>
+                    <div class="field">
+                        <label for="videoPreset">Preset (-preset)</label>
+                        <input type="text" id="videoPreset" value="ultrafast" placeholder="ultrafast">
+                    </div>
+                </div>
 
-        <label for="nowPlayingLabel">Now Playing Label</label>
-        <input type="text" id="nowPlayingLabel" value="Now Playing:" placeholder="Now Playing:">
+                <div class="row-2">
+                    <div class="field">
+                        <label for="videoBitrate">Bitrate (-b:v)</label>
+                        <input type="text" id="videoBitrate" value="6000k" placeholder="6000k">
+                    </div>
+                    <div class="field">
+                        <label for="videoMaxRate">Maxrate (-maxrate)</label>
+                        <input type="text" id="videoMaxRate" value="6000k" placeholder="6000k">
+                    </div>
+                </div>
 
-        <label for="nextSongLabel">Next Song Label</label>
-        <input type="text" id="nextSongLabel" value="Next song:" placeholder="Leave empty to hide">
+                <div class="field">
+                    <label for="videoBufSize">Bufsize (-bufsize)</label>
+                    <input type="text" id="videoBufSize" value="12000k" placeholder="12000k">
+                </div>
+
+                <div class="row-2" style="margin-top: 12px;">
+                    <div class="field">
+                        <label for="textX">Playing Text X</label>
+                        <input type="text" id="textX" value="30" placeholder="30 or w-tw-30">
+                    </div>
+                    <div class="field">
+                        <label for="textY">Playing Text Y</label>
+                        <input type="text" id="textY" value="h-th-30" placeholder="h-th-30 or 50">
+                    </div>
+                </div>
+
+                <div class="row-2">
+                    <div class="field">
+                        <label for="nowPlayingLabel">Playing Label</label>
+                        <input type="text" id="nowPlayingLabel" value="Now Playing:" placeholder="Now Playing:">
+                    </div>
+                    <div class="field">
+                        <label for="nextSongLabel">Next Label</label>
+                        <input type="text" id="nextSongLabel" value="Next song:" placeholder="Leave empty to hide">
+                    </div>
+                </div>
+            </div>
+        </details>
         </div>
         </div><!-- /sidebar-body -->
     </aside>
@@ -174,6 +230,11 @@ const Dashboard = `
             document.getElementById('audioDir').value  = s.audio_dir  || '';
             document.getElementById('playlistOrder').value = s.playlist_order || (s.shuffle_playlist ? 'shuffle' : 'normal');
             document.getElementById('fontPath').value  = s.font_path  || '';
+            document.getElementById('videoCodec').value   = s.video_codec   || 'libx264';
+            document.getElementById('videoPreset').value  = s.video_preset  || 'ultrafast';
+            document.getElementById('videoBitrate').value = s.video_bitrate || '6000k';
+            document.getElementById('videoMaxRate').value = s.video_maxrate || '6000k';
+            document.getElementById('videoBufSize').value = s.video_bufsize || '12000k';
             document.getElementById('textX').value     = s.text_x     || '30';
             document.getElementById('textY').value     = s.text_y     || 'h-th-30';
             document.getElementById('nowPlayingLabel').value = s.now_playing_label !== undefined ? s.now_playing_label : 'Now Playing:';
@@ -195,6 +256,11 @@ const Dashboard = `
             audio_dir:         document.getElementById('audioDir').value,
             playlist_order:    document.getElementById('playlistOrder').value,
             font_path:         document.getElementById('fontPath').value,
+            video_codec:       document.getElementById('videoCodec').value,
+            video_preset:      document.getElementById('videoPreset').value,
+            video_bitrate:     document.getElementById('videoBitrate').value,
+            video_maxrate:     document.getElementById('videoMaxRate').value,
+            video_bufsize:     document.getElementById('videoBufSize').value,
             text_x:            document.getElementById('textX').value,
             text_y:            document.getElementById('textY').value,
             now_playing_label: document.getElementById('nowPlayingLabel').value,
@@ -304,6 +370,11 @@ const Dashboard = `
             audioDir: document.getElementById('audioDir').value,
             playlistOrder: document.getElementById('playlistOrder').value,
             fontPath: document.getElementById('fontPath').value,
+            videoCodec: document.getElementById('videoCodec').value,
+            videoPreset: document.getElementById('videoPreset').value,
+            videoBitrate: document.getElementById('videoBitrate').value,
+            videoMaxRate: document.getElementById('videoMaxRate').value,
+            videoBufSize: document.getElementById('videoBufSize').value,
             textX: document.getElementById('textX').value,
             textY: document.getElementById('textY').value,
             nowPlayingLabel: document.getElementById('nowPlayingLabel').value,

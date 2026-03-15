@@ -18,6 +18,11 @@ type DashboardSettings struct {
 	PlaylistOrder   string `yaml:"playlist_order"    json:"playlist_order"`
 	ShufflePlaylist bool   `yaml:"shuffle_playlist,omitempty"  json:"shuffle_playlist,omitempty"`
 	FontPath        string `yaml:"font_path"         json:"font_path"`
+	VideoCodec      string `yaml:"video_codec"       json:"video_codec"`
+	VideoPreset     string `yaml:"video_preset"      json:"video_preset"`
+	VideoBitrate    string `yaml:"video_bitrate"     json:"video_bitrate"`
+	VideoMaxRate    string `yaml:"video_maxrate"     json:"video_maxrate"`
+	VideoBufSize    string `yaml:"video_bufsize"     json:"video_bufsize"`
 	TextX           string `yaml:"text_x"            json:"text_x"`
 	TextY           string `yaml:"text_y"            json:"text_y"`
 	NowPlayingLabel string `yaml:"now_playing_label" json:"now_playing_label"`
