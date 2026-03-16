@@ -31,49 +31,28 @@ func (h *Handler) AutoStartFromSavedSettings() error {
 		return errors.New("no saved settings found")
 	}
 
-	audioDir := saved.AudioDir
-	playlistOrder := saved.PlaylistOrder
-	streamEndMode := saved.StreamEndMode
-	endAfterMinutes := saved.EndAfterMinutes
-	videoPath := saved.VideoPath
-	fontPath := saved.FontPath
-	textX := saved.TextX
-	textY := saved.TextY
-	nowPlayingLabel := saved.NowPlayingLabel
-	nextSongLabel := saved.NextSongLabel
-	for _, p := range saved.Profiles {
-		if p.ID == saved.SelectedProfile {
-			audioDir = p.AudioDir
-			playlistOrder = p.PlaylistOrder
-			streamEndMode = p.StreamEndMode
-			endAfterMinutes = p.EndAfterMinutes
-			videoPath = p.VideoPath
-			fontPath = p.FontPath
-			textX = p.TextX
-			textY = p.TextY
-			nowPlayingLabel = p.NowPlayingLabel
-			nextSongLabel = p.NextSongLabel
-			break
-		}
+	profile, err := settings.GetActiveProfile(saved)
+	if err != nil {
+		return fmt.Errorf("failed to get active profile: %w", err)
 	}
 
 	req := stream.StartRequest{
 		StreamKey:       saved.StreamKey,
-		VideoPath:       videoPath,
-		AudioDir:        audioDir,
-		PlaylistOrder:   playlistOrder,
-		StreamEndMode:   streamEndMode,
-		EndAfterMinutes: endAfterMinutes,
-		FontPath:        fontPath,
+		VideoPath:       profile.VideoPath,
+		AudioDir:        profile.AudioDir,
+		PlaylistOrder:   profile.PlaylistOrder,
+		StreamEndMode:   profile.StreamEndMode,
+		EndAfterMinutes: profile.EndAfterMinutes,
+		FontPath:        profile.FontPath,
+		TextX:           profile.TextX,
+		TextY:           profile.TextY,
+		NowPlayingLabel: profile.NowPlayingLabel,
+		NextSongLabel:   profile.NextSongLabel,
 		VideoCodec:      saved.VideoCodec,
 		VideoPreset:     saved.VideoPreset,
 		VideoBitrate:    saved.VideoBitrate,
 		VideoMaxRate:    saved.VideoMaxRate,
 		VideoBufSize:    saved.VideoBufSize,
-		TextX:           textX,
-		TextY:           textY,
-		NowPlayingLabel: nowPlayingLabel,
-		NextSongLabel:   nextSongLabel,
 	}
 
 	if req.StreamKey == "" || req.VideoPath == "" || req.AudioDir == "" || req.FontPath == "" {
@@ -209,7 +188,7 @@ func (h *Handler) handleSaveSettings(c *fiber.Ctx) error {
 	if err := c.BodyParser(&s); err != nil {
 		return c.Status(fiber.StatusBadRequest).SendString(err.Error())
 	}
-	if err := settings.Save(s); err != nil {
+	if err := settings.Save(&s); err != nil {
 		return c.Status(fiber.StatusInternalServerError).SendString(err.Error())
 	}
 	return c.JSON(fiber.Map{"message": "Settings saved"})

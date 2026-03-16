@@ -1,6 +1,7 @@
 package settings
 
 import (
+	"errors"
 	"os"
 	"strings"
 
@@ -33,53 +34,62 @@ type DashboardSettings struct {
 	SelectedProfile string          `yaml:"selected_profile"  json:"selected_profile"`
 	Profiles        []StreamProfile `yaml:"profiles" json:"profiles"`
 	StreamKey       string          `yaml:"stream_key"        json:"stream_key"`
-	VideoPath       string          `yaml:"video_path"        json:"video_path"`
-	AudioDir        string          `yaml:"audio_dir"         json:"audio_dir"`
-	PlaylistOrder   string          `yaml:"playlist_order"    json:"playlist_order"`
-	StreamEndMode   string          `yaml:"stream_end_mode"   json:"stream_end_mode"`
-	EndAfterMinutes string          `yaml:"end_after_minutes" json:"end_after_minutes"`
-	ShufflePlaylist bool            `yaml:"shuffle_playlist,omitempty"  json:"shuffle_playlist,omitempty"`
-	FontPath        string          `yaml:"font_path"         json:"font_path"`
 	VideoCodec      string          `yaml:"video_codec"       json:"video_codec"`
 	VideoPreset     string          `yaml:"video_preset"      json:"video_preset"`
 	VideoBitrate    string          `yaml:"video_bitrate"     json:"video_bitrate"`
 	VideoMaxRate    string          `yaml:"video_maxrate"     json:"video_maxrate"`
 	VideoBufSize    string          `yaml:"video_bufsize"     json:"video_bufsize"`
-	TextX           string          `yaml:"text_x"            json:"text_x"`
-	TextY           string          `yaml:"text_y"            json:"text_y"`
-	NowPlayingLabel string          `yaml:"now_playing_label" json:"now_playing_label"`
-	NextSongLabel   string          `yaml:"next_song_label"   json:"next_song_label"`
 }
 
 // Load reads settings.yaml. Returns zero-value settings (Saved=false) if the
 // file does not exist yet, so callers can detect "no saved settings".
-func Load() (DashboardSettings, error) {
+func Load() (*DashboardSettings, error) {
 	var s DashboardSettings
 	data, err := os.ReadFile(filePath)
 	if os.IsNotExist(err) {
 		normalizeProfiles(&s)
-		return s, nil
+		return &s, nil
 	}
 	if err != nil {
-		return s, err
+		return nil, err
 	}
 	if err := yaml.Unmarshal(data, &s); err != nil {
-		return s, err
+		return nil, err
 	}
 	normalizeProfiles(&s)
-	return s, nil
+	return &s, nil
 }
 
 // Save writes s to settings.yaml, setting the Saved flag so future loads can
 // distinguish "explicitly saved" from "never saved".
-func Save(s DashboardSettings) error {
+func Save(s *DashboardSettings) error {
 	s.Saved = true
-	normalizeProfiles(&s)
-	data, err := yaml.Marshal(&s)
+	normalizeProfiles(s)
+	data, err := yaml.Marshal(s)
 	if err != nil {
 		return err
 	}
 	return os.WriteFile(filePath, data, 0644)
+}
+
+func GetActiveProfile(s *DashboardSettings) (*StreamProfile, error) {
+	if s == nil {
+		return nil, errors.New("settings is nil")
+	}
+	for _, p := range s.Profiles {
+		if p.ID == s.SelectedProfile {
+			return &p, nil
+		}
+	}
+
+	// return default profile if selected not found
+	for _, p := range s.Profiles {
+		if p.ID == DefaultProfileID {
+			return &p, nil
+		}
+	}
+
+	return nil, errors.New("active profile not found")
 }
 
 func normalizeProfiles(s *DashboardSettings) {
@@ -88,7 +98,7 @@ func normalizeProfiles(s *DashboardSettings) {
 	}
 
 	if len(s.Profiles) == 0 {
-		s.Profiles = []StreamProfile{buildDefaultProfile(s)}
+		s.Profiles = []StreamProfile{buildDefaultProfile()}
 	} else {
 		normalized := make([]StreamProfile, 0, len(s.Profiles)+1)
 		seen := map[string]bool{}
@@ -132,7 +142,7 @@ func normalizeProfiles(s *DashboardSettings) {
 		}
 
 		if !hasDefault {
-			normalized = append([]StreamProfile{buildDefaultProfile(s)}, normalized...)
+			normalized = append([]StreamProfile{buildDefaultProfile()}, normalized...)
 		}
 
 		s.Profiles = normalized
@@ -152,74 +162,21 @@ func normalizeProfiles(s *DashboardSettings) {
 	if !selectedFound {
 		s.SelectedProfile = DefaultProfileID
 	}
-
-	active := s.Profiles[0]
-	for _, p := range s.Profiles {
-		if p.ID == s.SelectedProfile {
-			active = p
-			break
-		}
-	}
-
-	// Keep legacy top-level fields in sync for backward compatibility.
-	s.AudioDir = active.AudioDir
-	s.PlaylistOrder = active.PlaylistOrder
-	s.StreamEndMode = active.StreamEndMode
-	s.EndAfterMinutes = active.EndAfterMinutes
-	s.VideoPath = active.VideoPath
-	s.FontPath = active.FontPath
-	s.TextX = active.TextX
-	s.TextY = active.TextY
-	s.NowPlayingLabel = active.NowPlayingLabel
-	s.NextSongLabel = active.NextSongLabel
 }
 
-func buildDefaultProfile(s *DashboardSettings) StreamProfile {
-	audioDir := s.AudioDir
-	playlistOrder := s.PlaylistOrder
-	streamEndMode := s.StreamEndMode
-	endAfter := s.EndAfterMinutes
-	videoPath := s.VideoPath
-	fontPath := s.FontPath
-	textX := s.TextX
-	textY := s.TextY
-	nowPlayingLabel := s.NowPlayingLabel
-	nextSongLabel := s.NextSongLabel
-
-	if strings.TrimSpace(playlistOrder) == "" {
-		playlistOrder = "normal"
-	}
-	if strings.TrimSpace(streamEndMode) == "" {
-		streamEndMode = "forever"
-	}
-	if strings.TrimSpace(endAfter) == "" {
-		endAfter = "60"
-	}
-	if strings.TrimSpace(textX) == "" {
-		textX = "30"
-	}
-	if strings.TrimSpace(textY) == "" {
-		textY = "h-th-30"
-	}
-	if nowPlayingLabel == "" {
-		nowPlayingLabel = "Now Playing:"
-	}
-	if nextSongLabel == "" {
-		nextSongLabel = "Next song:"
-	}
-
+func buildDefaultProfile() StreamProfile {
 	return StreamProfile{
 		ID:              DefaultProfileID,
 		Name:            "Default",
-		AudioDir:        audioDir,
-		PlaylistOrder:   playlistOrder,
-		StreamEndMode:   streamEndMode,
-		EndAfterMinutes: endAfter,
-		VideoPath:       videoPath,
-		FontPath:        fontPath,
-		TextX:           textX,
-		TextY:           textY,
-		NowPlayingLabel: nowPlayingLabel,
-		NextSongLabel:   nextSongLabel,
+		AudioDir:        "",
+		PlaylistOrder:   "normal",
+		StreamEndMode:   "forever",
+		EndAfterMinutes: "60",
+		VideoPath:       "",
+		FontPath:        "",
+		TextX:           "30",
+		TextY:           "h-th-30",
+		NowPlayingLabel: "Now Playing:",
+		NextSongLabel:   "Next song:",
 	}
 }
