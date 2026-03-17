@@ -381,15 +381,43 @@ func (s *Service) runStream(ctx context.Context, streamKey, videoFile, fontFile,
 		rtmpURL,
 	}
 
-	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	// cmd := exec.CommandContext(ctx, "ffmpeg", args...)
+	// cmd.Stdout = os.Stdout
+	// cmd.Stderr = os.Stderr
 
-	s.logf("FFmpeg output target: %s\n", rtmpURL)
-	s.logf("FFmpeg internal audio source: %s\n", internalAudioURL)
+	// s.logf("FFmpeg output target: %s\n", rtmpURL)
+	// s.logf("FFmpeg internal audio source: %s\n", internalAudioURL)
 
-	if err := cmd.Run(); err != nil {
-		s.logf("FFmpeg exited: %v\n", err)
+	// if err := cmd.Run(); err != nil {
+	// 	s.logf("FFmpeg exited: %v\n", err)
+	// }
+
+	// The above code runs FFmpeg once, but if FFmpeg crashes due to a network blip or YouTube reset,
+	// the stream will go down until the user manually restarts it.
+	// To create a more resilient stream that can automatically recover from transient errors,
+	// we wrap the FFmpeg execution in a loop that will attempt to restart it if it exits unexpectedly.
+	// The loop will only break if the context is canceled, which happens when the user clicks "Stop Stream"
+	// in the web interface.
+	for {
+		s.logln("▶️ Starting FFmpeg encoder...")
+		cmd := exec.CommandContext(ctx, "ffmpeg", args...)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+
+		err := cmd.Run()
+
+		// Check if the context was canceled, which indicates a graceful shutdown request from the web interface
+		if ctx.Err() != nil {
+			s.logln("🛑 Stream has been safely stopped from the web interface.")
+			break // Exit the loop to allow cleanup and shutdown
+		}
+
+		// If the code reaches this point, it means FFmpeg crashed unexpectedly!
+		s.logf("\n⚠️ Warning (%v)!\n", err)
+		s.logln("🔄 Attempting to reconnect automatically in 5 seconds...")
+
+		// Wait 5 seconds for the network to stabilize or for YouTube to reset the stream before pushing again
+		time.Sleep(5 * time.Second)
 	}
 }
 
