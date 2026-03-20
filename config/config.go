@@ -29,6 +29,10 @@ func Load() *AppConfig {
 	return cfg
 }
 
+func (cfg *AppConfig) IsDevMode() bool {
+	return cfg.ServerMode == "dev"
+}
+
 func normalizePort(port string) string {
 	trimmed := strings.TrimSpace(port)
 	if trimmed == "" {

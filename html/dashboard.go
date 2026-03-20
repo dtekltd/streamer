@@ -722,8 +722,7 @@ const Dashboard = `
         btn.innerText = isStreaming ? "Updating..." : "Checking...";
 
         try {
-            const endpoint = isStreaming ? '/api/update-playlist' : '/api/preview-playlist';
-            const res = await fetch(endpoint, {
+            const res = await fetch('/api/update-playlist', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -739,14 +738,11 @@ const Dashboard = `
             }
 
             const data = await res.json();
-            if (!isStreaming) {
-                previewSongs = data.playlist || [];
-                renderSongList(previewSongs, "");
-                document.getElementById('playlistBox').style.display = previewSongs.length > 0 ? 'block' : 'none';
-                alert("Playlist checked. " + data.songs + " songs ready for live stream.");
-            } else {
-                alert("Playlist updated. " + data.songs + " songs loaded.");
-            }
+            previewSongs = data.playlist || [];
+            renderSongList(previewSongs, "");
+            document.getElementById('playlistBox').style.display = previewSongs.length > 0 ? 'block' : 'none';
+            alert("Playlist checked. " + data.songs + " songs ready for live stream.");
+        
             await fetchStatus();
         } catch (e) {
             alert("Failed to update playlist: " + e.message);

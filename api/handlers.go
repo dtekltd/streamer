@@ -69,7 +69,6 @@ func (h *Handler) RegisterRoutes(app *fiber.App) {
 	api := app.Group("/api")
 	api.Post("/start", h.handleStartStream)
 	api.Post("/stop", h.handleStopStream)
-	api.Post("/preview-playlist", h.handlePreviewPlaylist)
 	api.Post("/update-playlist", h.handleUpdatePlaylist)
 	api.Get("/status", h.handleStatus)
 	api.Get("/settings", h.handleGetSettings)
@@ -128,7 +127,7 @@ func (h *Handler) handleUpdatePlaylist(c *fiber.Ctx) error {
 		}
 	}
 
-	count, err := h.streamService.UpdatePlaylist(req.PlaylistOrder, req.AudioDir, req.StreamEndMode, req.EndAfterMinutes)
+	playlist, err := h.streamService.UpdatePlaylist(req.PlaylistOrder, req.AudioDir, req.StreamEndMode, req.EndAfterMinutes)
 	if err != nil {
 		if errors.Is(err, stream.ErrStreamNotRunning) {
 			return c.Status(fiber.StatusBadRequest).SendString("Stream is not running")
@@ -139,29 +138,8 @@ func (h *Handler) handleUpdatePlaylist(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).SendString(err.Error())
 	}
 
-	return c.JSON(fiber.Map{"message": "Playlist updated", "songs": count})
-}
-
-func (h *Handler) handlePreviewPlaylist(c *fiber.Ctx) error {
-	var req struct {
-		PlaylistOrder string `json:"playlistOrder"`
-		AudioDir      string `json:"audioDir"`
-	}
-
-	if err := c.BodyParser(&req); err != nil {
-		return c.Status(fiber.StatusBadRequest).SendString(err.Error())
-	}
-
-	playlist, err := h.streamService.PreviewPlaylist(req.AudioDir, req.PlaylistOrder)
-	if err != nil {
-		if errors.Is(err, stream.ErrNoSongsFound) {
-			return c.Status(fiber.StatusBadRequest).SendString("No MP3 files found in the audio directory")
-		}
-		return c.Status(fiber.StatusBadRequest).SendString(err.Error())
-	}
-
+	// return c.JSON(fiber.Map{"message": "Playlist updated", "songs": count})
 	return c.JSON(fiber.Map{
-		"message":  "Playlist preview ready",
 		"songs":    len(playlist),
 		"playlist": playlist,
 	})

@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"time"
 
 	"streamer/api"
 	"streamer/config"
@@ -18,7 +19,39 @@ func main() {
 	cfg := config.Load()
 	listenAddr := ":" + cfg.ServerPort
 
-	app := fiber.New()
+	app := fiber.New(fiber.Config{
+		AppName: "YouTube Streamer",
+	})
+
+	// if cfg.IsDevMode() {
+	// 	// Use default logger middleware
+	// 	app.Use(logger.New())
+	// }
+
+	// Custom middleware for POST
+	app.Use(func(c *fiber.Ctx) error {
+		if c.Method() == "POST" {
+			start := time.Now()
+
+			// Process request
+			err := c.Next()
+
+			// Log after request completes
+			duration := time.Since(start)
+			fmt.Printf("[%s] %s %s - %d - %v\n",
+				time.Now().Format("2006-01-02 15:04:05"),
+				c.Method(),
+				c.Path(),
+				c.Response().StatusCode(),
+				duration,
+			)
+
+			return err
+		}
+
+		return c.Next()
+	})
+
 	handler := api.NewHandler(cfg)
 	handler.RegisterRoutes(app)
 

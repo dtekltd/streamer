@@ -24,6 +24,7 @@ type StreamState struct {
 	isRunning       bool
 	playlistOrder   string
 	streamEndMode   string
+	isEnding        bool
 	endAfter        time.Duration
 	startedAt       time.Time
 	currentSong     string

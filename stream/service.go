@@ -32,13 +32,20 @@ func NewService(cfg *config.AppConfig) *Service {
 }
 
 func (s *Service) Start(req StartRequest) error {
+	songs := s.state.songs
 	playlistOrder := normalizePlaylistOrder(req.PlaylistOrder)
-	songs, err := prepareAudioList(req.AudioDir, playlistOrder)
-	if err != nil {
-		return err
-	}
-	if len(songs) == 0 {
-		return ErrNoSongsFound
+
+	// Only re-prepare the playlist if the order has changed or if we don't have a playlist loaded yet.
+	if playlistOrder != s.state.playlistOrder || len(songs) == 0 {
+		s.logf("Update playlist order: %s (previous: %s, songs: %d)\n", playlistOrder, s.state.playlistOrder, len(songs))
+		var err error
+		songs, err = prepareAudioList(req.AudioDir, playlistOrder)
+		if err != nil {
+			return err
+		}
+		if len(songs) == 0 {
+			return ErrNoSongsFound
+		}
 	}
 
 	s.state.mu.Lock()
@@ -87,12 +94,13 @@ func (s *Service) Start(req StartRequest) error {
 	return nil
 }
 
-func (s *Service) UpdatePlaylist(orderOverride, audioDirOverride, streamEndModeOverride, endAfterMinutesOverride *string) (int, error) {
+func (s *Service) UpdatePlaylist(orderOverride, audioDirOverride, streamEndModeOverride, endAfterMinutesOverride *string) ([]PlaylistItem, error) {
 	s.state.mu.Lock()
-	if !s.state.isRunning {
-		s.state.mu.Unlock()
-		return 0, ErrStreamNotRunning
-	}
+	// Allow updating playlist order, audio directory, and stream end mode on the fly without restarting the stream
+	// if !s.state.isRunning {
+	// 	s.state.mu.Unlock()
+	// 	return 0, ErrStreamNotRunning
+	// }
 	if orderOverride != nil {
 		s.state.playlistOrder = normalizePlaylistOrder(*orderOverride)
 	}
@@ -114,36 +122,19 @@ func (s *Service) UpdatePlaylist(orderOverride, audioDirOverride, streamEndModeO
 
 	songs, err := prepareAudioList(audioDir, playlistOrder)
 	if err != nil {
-		return 0, err
-	}
-	if len(songs) == 0 {
-		return 0, ErrNoSongsFound
-	}
-
-	s.state.mu.Lock()
-	if !s.state.isRunning {
-		s.state.mu.Unlock()
-		return 0, ErrStreamNotRunning
-	}
-	s.state.songs = songs
-	s.state.mu.Unlock()
-
-	return len(songs), nil
-}
-
-func (s *Service) PreviewPlaylist(audioDir, playlistOrder string) ([]PlaylistItem, error) {
-	cleanDir := strings.TrimSpace(audioDir)
-	if cleanDir == "" {
-		return nil, errors.New("audio directory is required")
-	}
-
-	songs, err := prepareAudioList(cleanDir, normalizePlaylistOrder(playlistOrder))
-	if err != nil {
 		return nil, err
 	}
 	if len(songs) == 0 {
 		return nil, ErrNoSongsFound
 	}
+
+	s.state.mu.Lock()
+	// if !s.state.isRunning {
+	// 	s.state.mu.Unlock()
+	// 	return 0, ErrStreamNotRunning
+	// }
+	s.state.songs = songs
+	s.state.mu.Unlock()
 
 	playlist := make([]PlaylistItem, 0, len(songs))
 	var startOffset time.Duration
@@ -219,7 +210,7 @@ func (s *Service) StreamAudio(w *bufio.Writer) error {
 		}
 
 		if streamEndMode == StreamEndDuration && endAfter > 0 && time.Since(startedAt) >= endAfter {
-			s.logln("Configured stream duration reached. Stopping stream.")
+			s.logln("Configured stream duration reached. Will stop the stream after the current song finishes.")
 			s.Stop()
 			return nil
 		}
@@ -231,7 +222,7 @@ func (s *Service) StreamAudio(w *bufio.Writer) error {
 
 		for idx, song := range songs {
 			if streamEndMode == StreamEndDuration && endAfter > 0 && time.Since(startedAt) >= endAfter {
-				s.logln("Configured stream duration reached. Stopping stream.")
+				s.logln("Configured stream duration reached. Will stop the stream after the current song finishes.")
 				s.Stop()
 				return nil
 			}
@@ -274,13 +265,9 @@ func (s *Service) StreamAudio(w *bufio.Writer) error {
 			}
 
 			// Look at the stopwatch. Wait out the remaining length of the song,
-			// minus a second padding to keep FFmpeg's buffer fed!
 			elapsed := time.Since(start)
-			bufferPadding := 1 * time.Second
-
-			if elapsed+bufferPadding < song.Duration {
-				remaining := song.Duration - elapsed - bufferPadding
-				// s.logf("Sleep %v until fed next song...\n", remaining)
+			if elapsed < song.Duration {
+				remaining := song.Duration - elapsed
 				time.Sleep(remaining)
 			}
 
@@ -290,11 +277,17 @@ func (s *Service) StreamAudio(w *bufio.Writer) error {
 		}
 
 		if streamEndMode == StreamEndAllSongs {
-			s.logln("All songs have been played once. Stopping stream.")
+			s.logln("All songs have been played once. Will stop the stream after the current song finishes.")
 			s.Stop()
 			return nil
 		}
 	}
+}
+
+func (s *Service) markEnding() {
+	s.state.mu.Lock()
+	defer s.state.mu.Unlock()
+	s.state.isEnding = true
 }
 
 func (s *Service) runStream(ctx context.Context, streamKey, videoFile, fontFile, textX, textY, videoCodec, videoPreset, videoBitrate, videoMaxRate, videoBufSize string) {
@@ -303,13 +296,16 @@ func (s *Service) runStream(ctx context.Context, streamKey, videoFile, fontFile,
 		s.state.isRunning = false
 		s.state.currentSong = ""
 		s.state.nextSong = ""
-		s.state.playlistOrder = ""
 		s.state.streamEndMode = ""
 		s.state.endAfter = 0
 		s.state.startedAt = time.Time{}
 		s.state.nowPlayingLabel = ""
 		s.state.nextSongLabel = ""
-		s.state.songs = nil
+		// Keep the last loaded playlist in memory so that if the user clicks "Start Stream" again
+		// without changing settings, we can start immediately without having to re-scan the audio
+		// directory and re-prepare the playlist.
+		// s.state.playlistOrder = ""
+		// s.state.songs = nil
 		s.state.audioDir = ""
 		s.state.cancel = nil
 		s.state.mu.Unlock()
