@@ -314,53 +314,14 @@ func (s *Service) runStream(ctx context.Context, streamKey, videoFile, fontFile,
 		s.logln("Stream fully stopped and cleaned up.")
 	}()
 
-	nowPlayingLabel, nextSongLabel := s.getOverlayLabels()
-	nowInitialText := formatNowPlayingText(nowPlayingLabel, "Starting...")
-	nextInitialText := formatNextSongText(nextSongLabel, "")
-
-	// Ensure drawtext can read a non-empty file before FFmpeg starts.
-	if err := os.WriteFile(nowPlayingFile, []byte(nowInitialText), 0644); err != nil {
-		s.logf("Failed to initialize now playing file: %v\n", err)
-	}
-	if err := os.WriteFile(nextPlayingFile, []byte(nextInitialText), 0644); err != nil {
-		s.logf("Failed to initialize next song file: %v\n", err)
-	}
-
-	rtmpURL := fmt.Sprintf(s.cfg.StreamURLTemplate, streamKey)
-	internalAudioURL := fmt.Sprintf("http://127.0.0.1:%s/internal/audio", s.cfg.ServerPort)
-	safeFontPath := filepath.ToSlash(fontFile)                  // Convert Windows backslashes to forward slashes
-	safeFontPath = strings.Replace(safeFontPath, ":", "\\:", 1) // Escape the Windows drive colon (e.g., turns "E:/" into "E\:/")
-	nowTextY := textY
-	nextTextY := fmt.Sprintf("(%s)+55", textY)
-
-	// Draw the Now Playing text (large and white)
-	drawNowPlaying := fmt.Sprintf("drawtext=fontfile='%s':textfile='%s':reload=1:fontcolor=white:fontsize=40:box=1:boxcolor=black@0.6:boxborderw=10:x=%s:y=%s", safeFontPath, nowPlayingFile, textX, nowTextY)
-
-	combinedFilter := ""
-	if normalizeNextSongLabel(nextSongLabel) == "" {
-		combinedFilter = fmt.Sprintf("[0:v]%s[v]", drawNowPlaying)
-	} else {
-		// Draw the Next Song text (smaller and light gray)
-		drawNextPlaying := fmt.Sprintf("drawtext=fontfile='%s':textfile='%s':reload=1:fontcolor=white@0.7:fontsize=30:box=1:boxcolor=black@0.6:boxborderw=10:x=%s:y=%s", safeFontPath, nextPlayingFile, textX, nextTextY)
-		combinedFilter = fmt.Sprintf("[0:v]%s,%s[v]", drawNowPlaying, drawNextPlaying)
-	}
-
 	args := []string{
 		"-re",
 		"-stream_loop", "-1",
 		"-i", videoFile,
-		"-reconnect", "1",
-		"-reconnect_streamed", "1",
-		"-reconnect_delay_max", "5",
-		"-i", internalAudioURL,
-		"-filter_complex", combinedFilter,
-		"-map", "[v]",
+		"-i", fmt.Sprintf("http://127.0.0.1:%s/internal/audio", s.cfg.ServerPort),
 		"-map", "1:a",
 		"-c:v", videoCodec,
 		// "-preset", "veryfast",
-		// // "-b:v", "3000k",
-		// // "-maxrate", "3000k",
-		// // "-bufsize", "6000k",
 		// "-b:v", "13500k", // Set target bitrate to 13.5 Mbps
 		// "-maxrate", "13500k", // Cap the maximum bitrate at 13.5 Mbps
 		// "-bufsize", "27000k", // Set buffer size to double the maxrate (Standard practice)
@@ -374,21 +335,57 @@ func (s *Service) runStream(ctx context.Context, streamKey, videoFile, fontFile,
 		"-b:a", "128k",
 		"-ar", "44100",
 		"-f", "flv",
-		rtmpURL,
+		"-flvflags", "no_duration_filesize", // Don't update duration/size
+		"-rtmp_buffer", "1000",
+		"-rtmp_live", "live",
+		"-reconnect", "1",
+		"-reconnect_at_eof", "1",
+		"-reconnect_streamed", "1",
+		"-reconnect_delay_max", "5",
 	}
 
-	// cmd := exec.CommandContext(ctx, "ffmpeg", args...)
-	// cmd.Stdout = os.Stdout
-	// cmd.Stderr = os.Stderr
+	if nowPlayingLabel, nextSongLabel := s.getOverlayLabels(); nowPlayingLabel != "" {
+		nowInitialText := formatNowPlayingText(nowPlayingLabel, "Starting...")
+		nextInitialText := formatNextSongText(nextSongLabel, "")
 
-	// s.logf("FFmpeg output target: %s\n", rtmpURL)
-	// s.logf("FFmpeg internal audio source: %s\n", internalAudioURL)
+		// Ensure drawtext can read a non-empty file before FFmpeg starts.
+		if err := os.WriteFile(nowPlayingFile, []byte(nowInitialText), 0644); err != nil {
+			s.logf("Failed to initialize now playing file: %v\n", err)
+		}
+		if err := os.WriteFile(nextPlayingFile, []byte(nextInitialText), 0644); err != nil {
+			s.logf("Failed to initialize next song file: %v\n", err)
+		}
 
-	// if err := cmd.Run(); err != nil {
-	// 	s.logf("FFmpeg exited: %v\n", err)
-	// }
+		safeFontPath := filepath.ToSlash(fontFile)                  // Convert Windows backslashes to forward slashes
+		safeFontPath = strings.Replace(safeFontPath, ":", "\\:", 1) // Escape the Windows drive colon (e.g., turns "E:/" into "E\:/")
+		nowTextY := textY
+		nextTextY := fmt.Sprintf("(%s)+55", textY)
 
-	// The above code runs FFmpeg once, but if FFmpeg crashes due to a network blip or YouTube reset,
+		// Draw the Now Playing text (large and white)
+		drawNowPlaying := fmt.Sprintf("drawtext=fontfile='%s':textfile='%s':reload=1:fontcolor=white:fontsize=40:box=1:boxcolor=black@0.6:boxborderw=10:x=%s:y=%s", safeFontPath, nowPlayingFile, textX, nowTextY)
+
+		combinedFilter := ""
+		if normalizeNextSongLabel(nextSongLabel) == "" {
+			combinedFilter = fmt.Sprintf("[0:v]%s[v]", drawNowPlaying)
+		} else {
+			// Draw the Next Song text (smaller and light gray)
+			drawNextPlaying := fmt.Sprintf("drawtext=fontfile='%s':textfile='%s':reload=1:fontcolor=white@0.7:fontsize=30:box=1:boxcolor=black@0.6:boxborderw=10:x=%s:y=%s", safeFontPath, nextPlayingFile, textX, nextTextY)
+			combinedFilter = fmt.Sprintf("[0:v]%s,%s[v]", drawNowPlaying, drawNextPlaying)
+		}
+		args = append(args, []string{
+			"-filter_complex", combinedFilter,
+			"-map", "[v]",
+		}...)
+	} else {
+		// If no overlay labels are set, we can skip the filter_complex and drawtext setup entirely
+		// and just pass through the video stream as-is for maximum performance.
+		args = append(args, "-map", "0:v")
+	}
+
+	args = append(args, fmt.Sprintf(s.cfg.StreamURLTemplate, streamKey))
+	// utils.Dump("args:", args)
+
+	// Restart if FFmpeg crashes due to a network blip or YouTube reset,
 	// the stream will go down until the user manually restarts it.
 	// To create a more resilient stream that can automatically recover from transient errors,
 	// we wrap the FFmpeg execution in a loop that will attempt to restart it if it exits unexpectedly.
@@ -412,8 +409,13 @@ func (s *Service) runStream(ctx context.Context, streamKey, videoFile, fontFile,
 		s.logf("\n⚠️ Warning (%v)!\n", err)
 		s.logln("🔄 Attempting to reconnect automatically in 5 seconds...")
 
-		// Wait 5 seconds for the network to stabilize or for YouTube to reset the stream before pushing again
-		time.Sleep(5 * time.Second)
+		if s.state.streamEndMode == StreamEndForever {
+			// Wait 5 seconds for the network to stabilize or for YouTube to reset the stream before pushing again
+			time.Sleep(5 * time.Second)
+		} else {
+			s.logln("Stream end mode is not set to 'forever', so will not attempt to restart the stream.")
+			break
+		}
 	}
 }
 
@@ -537,9 +539,9 @@ func (s *Service) getOverlayLabels() (string, string) {
 
 func normalizeNowPlayingLabel(label string) string {
 	trimmed := strings.TrimSpace(label)
-	if trimmed == "" {
-		return "Now Playing:"
-	}
+	// if trimmed == "" {
+	// 	return "Now Playing:"
+	// }
 	return trimmed
 }
 
