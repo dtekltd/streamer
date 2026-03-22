@@ -24,6 +24,7 @@ import (
 var ErrAlreadyRunning = errors.New("stream is already running")
 var ErrStreamNotRunning = errors.New("stream is not running")
 var ErrNoSongsFound = errors.New("no mp3 files found in directory")
+var ErrNoMediaInput = errors.New("background video path or audio directory must exist")
 
 const DefaultProfileID = "default"
 
@@ -45,6 +46,7 @@ func (s *Service) Start(req StartRequest) error {
 	state.mu.Lock()
 	songs := append([]Song(nil), state.songs...)
 	existingOrder := state.playlistOrder
+	existingAudioDir := state.audioDir
 	alreadyRunning := state.isRunning
 	state.mu.Unlock()
 
@@ -52,7 +54,16 @@ func (s *Service) Start(req StartRequest) error {
 		return ErrAlreadyRunning
 	}
 
-	if playlistOrder != existingOrder || len(songs) == 0 {
+	hasVideoInput := fileExists(req.VideoPath)
+	hasAudioInput := dirExists(req.AudioDir)
+	if !hasVideoInput && !hasAudioInput {
+		return ErrNoMediaInput
+	}
+	if !hasAudioInput {
+		songs = nil
+	}
+
+	if hasAudioInput && (strings.TrimSpace(req.AudioDir) != strings.TrimSpace(existingAudioDir) || playlistOrder != existingOrder || len(songs) == 0) {
 		s.logf("Update playlist for %s: %s (previous: %s, songs: %d)\n", profileID, playlistOrder, existingOrder, len(songs))
 		var err error
 		songs, err = prepareAudioList(req.AudioDir, playlistOrder)
@@ -75,11 +86,9 @@ func (s *Service) Start(req StartRequest) error {
 		textY = "h-th-30"
 	}
 
-	videoCodec := defaultString(req.VideoCodec, "libx264")
-	videoPreset := defaultString(req.VideoPreset, "ultrafast")
-	videoBitrate := defaultString(req.VideoBitrate, "6000k")
-	videoMaxRate := defaultString(req.VideoMaxRate, "6000k")
-	videoBufSize := defaultString(req.VideoBufSize, "12000k")
+	ffmpegArgs := defaultString(req.FFmpegArgs, defaultFFmpegArgs())
+	videoAudioEnabled := hasVideoInput && req.EnableVideoAudio && videoHasAudio(req.VideoPath)
+	videoAudioVolume := normalizeVideoAudioVolume(req.VideoAudioVolume)
 	streamURLTemplate := defaultString(req.StreamURLTemplate, "rtmp://10.16.0.165:1935/live/%s")
 	streamEndMode := normalizeStreamEndMode(req.StreamEndMode)
 	endAfter := parseEndAfterMinutes(req.EndAfterMinutes)
@@ -87,7 +96,11 @@ func (s *Service) Start(req StartRequest) error {
 	state.mu.Lock()
 	state.isRunning = true
 	state.playlistOrder = playlistOrder
-	state.audioDir = req.AudioDir
+	if hasAudioInput {
+		state.audioDir = req.AudioDir
+	} else {
+		state.audioDir = ""
+	}
 	state.songs = songs
 	state.currentSong = ""
 	state.nextSong = ""
@@ -99,7 +112,7 @@ func (s *Service) Start(req StartRequest) error {
 	state.cancel = cancel
 	state.mu.Unlock()
 
-	go s.runStream(ctx, profileID, req.StreamKey, streamURLTemplate, req.VideoPath, req.FontPath, textX, textY, videoCodec, videoPreset, videoBitrate, videoMaxRate, videoBufSize)
+	go s.runStream(ctx, profileID, req.StreamKey, streamURLTemplate, req.VideoPath, hasVideoInput, hasAudioInput, videoAudioEnabled, videoAudioVolume, req.FontPath, textX, textY, ffmpegArgs)
 	return nil
 }
 
@@ -325,7 +338,7 @@ func (s *Service) StreamAudio(profileID string, w *bufio.Writer) error {
 	}
 }
 
-func (s *Service) runStream(ctx context.Context, profileID, streamKey, streamURLTemplate, videoFile, fontFile, textX, textY, videoCodec, videoPreset, videoBitrate, videoMaxRate, videoBufSize string) {
+func (s *Service) runStream(ctx context.Context, profileID, streamKey, streamURLTemplate, videoFile string, hasVideoInput, hasAudioInput, videoAudioEnabled bool, videoAudioVolume, fontFile, textX, textY, ffmpegArgsText string) {
 	state := s.getOrCreateState(profileID)
 	nowFile, nextFile := overlayFilePaths(profileID)
 
@@ -347,33 +360,23 @@ func (s *Service) runStream(ctx context.Context, profileID, streamKey, streamURL
 		s.logf("Stream %s fully stopped and cleaned up.\n", profileID)
 	}()
 
+	audioInputURL := fmt.Sprintf("http://127.0.0.1:%s/internal/audio/%s", s.cfg.ServerPort, url.PathEscape(profileID))
 	args := []string{
-		"-re",
-		"-stream_loop", "-1",
-		"-i", videoFile,
-		"-i", fmt.Sprintf("http://127.0.0.1:%s/internal/audio/%s", s.cfg.ServerPort, url.PathEscape(profileID)),
-		"-map", "1:a",
-		"-c:v", videoCodec,
-		"-preset", videoPreset,
-		"-b:v", videoBitrate,
-		"-maxrate", videoMaxRate,
-		"-bufsize", videoBufSize,
-		"-pix_fmt", "yuv420p",
-		"-g", "50",
-		"-c:a", "aac",
-		"-b:a", "128k",
-		"-ar", "44100",
-		"-f", "flv",
-		"-flvflags", "no_duration_filesize",
-		"-rtmp_buffer", "1000",
-		"-rtmp_live", "live",
-		"-reconnect", "1",
-		"-reconnect_at_eof", "1",
-		"-reconnect_streamed", "1",
-		"-reconnect_delay_max", "5",
+		"-hide_banner",
+		"-loglevel", "error",
+		"-nostats",
+	}
+	filterParts := make([]string, 0, 4)
+	videoMap := ""
+	audioMap := ""
+	if hasVideoInput {
+		args = append(args, "-re", "-stream_loop", "-1", "-fflags", "+genpts", "-i", videoFile)
+	}
+	if hasAudioInput {
+		args = append(args, "-i", audioInputURL)
 	}
 
-	if nowPlayingLabel, nextSongLabel := s.getOverlayLabels(state); nowPlayingLabel != "" {
+	if nowPlayingLabel, nextSongLabel := s.getOverlayLabels(state); hasVideoInput && nowPlayingLabel != "" && fileExists(fontFile) {
 		nowInitialText := formatNowPlayingText(nowPlayingLabel, "Starting...")
 		nextInitialText := formatNextSongText(nextSongLabel, "")
 
@@ -398,14 +401,35 @@ func (s *Service) runStream(ctx context.Context, profileID, streamKey, streamURL
 			drawNextPlaying := fmt.Sprintf("drawtext=fontfile='%s':textfile='%s':reload=1:fontcolor=white@0.7:fontsize=30:box=1:boxcolor=black@0.6:boxborderw=10:x=%s:y=%s", safeFontPath, nextFile, textX, nextTextY)
 			combinedFilter = fmt.Sprintf("[0:v]%s,%s[v]", drawNowPlaying, drawNextPlaying)
 		}
-		args = append(args, []string{
-			"-filter_complex", combinedFilter,
-			"-map", "[v]",
-		}...)
-	} else {
-		args = append(args, "-map", "0:v")
+		filterParts = append(filterParts, combinedFilter)
+		videoMap = "[v]"
+	} else if hasVideoInput {
+		videoMap = "0:v"
 	}
 
+	if videoAudioEnabled {
+		filterParts = append(filterParts, fmt.Sprintf("[0:a]volume=%s[videoaudio]", videoAudioVolume))
+		if hasAudioInput {
+			filterParts = append(filterParts, fmt.Sprintf("[%d:a][videoaudio]amix=inputs=2:duration=longest:dropout_transition=2[a]", audioInputIndex(hasVideoInput)))
+			audioMap = "[a]"
+		} else {
+			audioMap = "[videoaudio]"
+		}
+	} else if hasAudioInput {
+		audioMap = fmt.Sprintf("%d:a", audioInputIndex(hasVideoInput))
+	}
+
+	if len(filterParts) > 0 {
+		args = append(args, "-filter_complex", strings.Join(filterParts, ";"))
+	}
+	if videoMap != "" {
+		args = append(args, "-map", videoMap)
+	}
+	if audioMap != "" {
+		args = append(args, "-map", audioMap)
+	}
+
+	args = append(args, filterManagedFFmpegArgs(parseFFmpegArgs(ffmpegArgsText), videoFile, audioInputURL, hasVideoInput, hasAudioInput)...)
 	args = append(args, fmt.Sprintf(streamURLTemplate, streamKey))
 
 	for {
@@ -589,6 +613,143 @@ func defaultString(value, fallback string) string {
 	return trimmed
 }
 
+func defaultFFmpegArgs() string {
+	return strings.Join([]string{
+		"-c:v",
+		"libx264",
+		"-preset",
+		"ultrafast",
+		"-b:v",
+		"6000k",
+		"-maxrate",
+		"6000k",
+		"-bufsize",
+		"12000k",
+		"-pix_fmt",
+		"yuv420p",
+		"-g",
+		"50",
+		"-c:a",
+		"aac",
+		"-b:a",
+		"128k",
+		"-ar",
+		"44100",
+		"-f",
+		"flv",
+		"-flvflags",
+		"no_duration_filesize",
+		"-rtmp_buffer",
+		"1000",
+		"-rtmp_live",
+		"live",
+		"-reconnect",
+		"1",
+		"-reconnect_at_eof",
+		"1",
+		"-reconnect_streamed",
+		"1",
+		"-reconnect_delay_max",
+		"5",
+	}, "\n")
+}
+
+func parseFFmpegArgs(value string) []string {
+	lines := strings.Split(value, "\n")
+	args := make([]string, 0, len(lines))
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		args = append(args, trimmed)
+	}
+	return args
+}
+
+func filterManagedFFmpegArgs(args []string, videoFile, audioInputURL string, hasVideoInput, hasAudioInput bool) []string {
+	filtered := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		if args[i] == "-i" && i+1 < len(args) {
+			next := args[i+1]
+			if hasVideoInput && samePath(next, videoFile) {
+				i++
+				continue
+			}
+			if hasAudioInput && isManagedAudioInput(next, audioInputURL) {
+				i++
+				continue
+			}
+		}
+		filtered = append(filtered, args[i])
+	}
+	return filtered
+}
+
+func isManagedAudioInput(value, audioInputURL string) bool {
+	trimmed := strings.TrimSpace(value)
+	candidates := []string{
+		audioInputURL,
+		strings.Replace(audioInputURL, "127.0.0.1", "localhost", 1),
+		"http://127.0.0.1:8080/internal/audio",
+		"http://localhost:8080/internal/audio",
+		fmt.Sprintf("http://127.0.0.1:8080/internal/audio/%s", url.PathEscape(DefaultProfileID)),
+		fmt.Sprintf("http://localhost:8080/internal/audio/%s", url.PathEscape(DefaultProfileID)),
+	}
+	for _, candidate := range candidates {
+		if strings.EqualFold(trimmed, candidate) {
+			return true
+		}
+	}
+	return false
+}
+
+func samePath(left, right string) bool {
+	if strings.TrimSpace(left) == "" || strings.TrimSpace(right) == "" {
+		return false
+	}
+	leftClean := filepath.Clean(strings.TrimSpace(left))
+	rightClean := filepath.Clean(strings.TrimSpace(right))
+	return strings.EqualFold(leftClean, rightClean)
+}
+
+func fileExists(path string) bool {
+	info, err := os.Stat(strings.TrimSpace(path))
+	if err != nil {
+		return false
+	}
+	return !info.IsDir()
+}
+
+func dirExists(path string) bool {
+	info, err := os.Stat(strings.TrimSpace(path))
+	if err != nil {
+		return false
+	}
+	return info.IsDir()
+}
+
+func videoHasAudio(path string) bool {
+	trimmed := strings.TrimSpace(path)
+	if trimmed == "" {
+		return false
+	}
+
+	cmd := exec.Command("ffprobe", "-v", "error", "-select_streams", "a:0", "-show_entries", "stream=index", "-of", "csv=p=0", trimmed)
+	out, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(string(out)) != ""
+}
+
+func audioInputIndex(hasVideoInput bool) int {
+	if hasVideoInput {
+		return 1
+	}
+	return 0
+}
+
 func normalizeStreamEndMode(mode string) string {
 	switch strings.ToLower(strings.TrimSpace(mode)) {
 	case StreamEndDuration:
@@ -612,6 +773,17 @@ func parseEndAfterMinutes(value string) time.Duration {
 	}
 
 	return time.Duration(minutes) * time.Minute
+}
+
+func normalizeVideoAudioVolume(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return "1.0"
+	}
+	if _, err := strconv.ParseFloat(trimmed, 64); err != nil {
+		return "1.0"
+	}
+	return trimmed
 }
 
 func normalizeProfileID(profileID string) string {

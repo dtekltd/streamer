@@ -18,6 +18,9 @@ type StreamProfile struct {
 	StreamKey         string `yaml:"stream_key"        json:"stream_key"`
 	StreamURLTemplate string `yaml:"stream_url_template" json:"stream_url_template"`
 	AudioDir          string `yaml:"audio_dir"         json:"audio_dir"`
+	EnableVideoAudio  bool   `yaml:"enable_video_audio" json:"enable_video_audio"`
+	VideoAudioVolume  string `yaml:"video_audio_volume" json:"video_audio_volume"`
+	FFmpegArgs        string `yaml:"ffmpeg_args"       json:"ffmpeg_args"`
 	PlaylistOrder     string `yaml:"playlist_order"    json:"playlist_order"`
 	StreamEndMode     string `yaml:"stream_end_mode"   json:"stream_end_mode"`
 	EndAfterMinutes   string `yaml:"end_after_minutes" json:"end_after_minutes"`
@@ -37,11 +40,6 @@ type DashboardSettings struct {
 	Profiles          []StreamProfile `yaml:"profiles" json:"profiles"`
 	StreamKey         string          `yaml:"stream_key"        json:"stream_key"`
 	StreamURLTemplate string          `yaml:"stream_url_template" json:"stream_url_template"`
-	VideoCodec        string          `yaml:"video_codec"       json:"video_codec"`
-	VideoPreset       string          `yaml:"video_preset"      json:"video_preset"`
-	VideoBitrate      string          `yaml:"video_bitrate"     json:"video_bitrate"`
-	VideoMaxRate      string          `yaml:"video_maxrate"     json:"video_maxrate"`
-	VideoBufSize      string          `yaml:"video_bufsize"     json:"video_bufsize"`
 }
 
 // Load reads settings.yaml. Returns zero-value settings (Saved=false) if the
@@ -144,6 +142,9 @@ func normalizeProfiles(s *DashboardSettings) {
 				StreamKey:         p.StreamKey,
 				StreamURLTemplate: defaultString(p.StreamURLTemplate, legacyTemplate),
 				AudioDir:          p.AudioDir,
+				EnableVideoAudio:  p.EnableVideoAudio,
+				VideoAudioVolume:  defaultString(p.VideoAudioVolume, "1.0"),
+				FFmpegArgs:        defaultString(p.FFmpegArgs, defaultFFmpegArgs()),
 				PlaylistOrder:     p.PlaylistOrder,
 				StreamEndMode:     p.StreamEndMode,
 				EndAfterMinutes:   p.EndAfterMinutes,
@@ -195,6 +196,9 @@ func buildDefaultProfile() StreamProfile {
 		StreamKey:         "",
 		StreamURLTemplate: "rtmp://10.16.0.165:1935/live/%s",
 		AudioDir:          "",
+		EnableVideoAudio:  false,
+		VideoAudioVolume:  "1.0",
+		FFmpegArgs:        defaultFFmpegArgs(),
 		PlaylistOrder:     "normal",
 		StreamEndMode:     "forever",
 		EndAfterMinutes:   "60",
@@ -213,4 +217,45 @@ func defaultString(value, fallback string) string {
 		return fallback
 	}
 	return trimmed
+}
+
+func defaultFFmpegArgs() string {
+	return strings.Join([]string{
+		"-c:v",
+		"libx264",
+		"-preset",
+		"ultrafast",
+		"-b:v",
+		"6000k",
+		"-maxrate",
+		"6000k",
+		"-bufsize",
+		"12000k",
+		"-pix_fmt",
+		"yuv420p",
+		"-g",
+		"50",
+		"-c:a",
+		"aac",
+		"-b:a",
+		"128k",
+		"-ar",
+		"44100",
+		"-f",
+		"flv",
+		"-flvflags",
+		"no_duration_filesize",
+		"-rtmp_buffer",
+		"1000",
+		"-rtmp_live",
+		"live",
+		"-reconnect",
+		"1",
+		"-reconnect_at_eof",
+		"1",
+		"-reconnect_streamed",
+		"1",
+		"-reconnect_delay_max",
+		"5",
+	}, "\n")
 }

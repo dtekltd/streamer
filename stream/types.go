@@ -58,16 +58,14 @@ type StartRequest struct {
 	StreamKey         string `json:"streamKey"`
 	StreamURLTemplate string `json:"streamUrlTemplate"`
 	VideoPath         string `json:"videoPath"`
+	EnableVideoAudio  bool   `json:"enableVideoAudio"`
+	VideoAudioVolume  string `json:"videoAudioVolume"`
 	AudioDir          string `json:"audioDir"`
+	FFmpegArgs        string `json:"ffmpegArgs"`
 	PlaylistOrder     string `json:"playlistOrder"`
 	StreamEndMode     string `json:"streamEndMode"`
 	EndAfterMinutes   string `json:"endAfterMinutes"`
 	FontPath          string `json:"fontPath"`
-	VideoCodec        string `json:"videoCodec"`
-	VideoPreset       string `json:"videoPreset"`
-	VideoBitrate      string `json:"videoBitrate"`
-	VideoMaxRate      string `json:"videoMaxRate"`
-	VideoBufSize      string `json:"videoBufSize"`
 	TextX             string `json:"textX"`
 	TextY             string `json:"textY"`
 	NowPlayingLabel   string `json:"nowPlayingLabel"`

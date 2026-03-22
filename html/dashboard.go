@@ -16,7 +16,8 @@ const Dashboard = `
         h1 { margin: 0 0 14px; color: #222; font-size: 1.5em; }
         .subtitle { margin: 0 0 10px; color: #5e6672; font-size: 14px; }
         label { font-weight: bold; font-size: 12px; display: block; margin-top: 13px; margin-bottom: 5px; }
-        input[type="text"] { width: 100%; padding: 10px; border: 1px solid #cfd6df; border-radius: 6px; box-sizing: border-box; }
+        input[type="text"], textarea { width: 100%; padding: 10px; border: 1px solid #cfd6df; border-radius: 6px; box-sizing: border-box; }
+        textarea { min-height: 220px; resize: vertical; font-family: "Consolas", "SFMono-Regular", monospace; }
         select { width: 100%; padding: 10px; border: 1px solid #cfd6df; border-radius: 6px; box-sizing: border-box; background: white; }
         .row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
         .field { min-width: 0; }
@@ -58,6 +59,7 @@ const Dashboard = `
         .btn-stop-mini { background: #dc3545; border: none; color: white; border-radius: 6px; padding: 8px 10px; font-size: 12px; cursor: pointer; font-weight: 700; }
         .btn-stop-mini:hover { background: #c82333; }
         .saved-indicator { font-size: 12px; color: #28a745; opacity: 0; transition: opacity 0.4s; margin-left: 8px; vertical-align: middle; }
+        .hint { margin-top: 6px; color: #5e6672; font-size: 12px; line-height: 1.5; }
         .sidebar-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
         .sidebar-header h1 { flex: 1; }
         .sidebar-toggle { background: none; border: 1px solid #cfd6df; border-radius: 6px; cursor: pointer; padding: 6px 9px; color: #5e6672; font-size: 16px; line-height: 1; flex-shrink: 0; margin-top: 4px; transition: background 0.15s, color 0.15s; }
@@ -152,9 +154,24 @@ const Dashboard = `
                     <input type="text" id="videoPath" value="" placeholder="C:\\videos\\loop.mp4 or ./loop.mp4">
                 </div>
 
+                <div class="row-2" style="margin-top: 12px;">
+                    <div class="field">
+                        <label for="enableVideoAudio">Enable Audio</label>
+                        <div class="checkbox-row">
+                            <input type="checkbox" id="enableVideoAudio">
+                            <label for="enableVideoAudio">Mix video audio</label>
+                        </div>
+                    </div>
+                    <div class="field">
+                        <label for="videoAudioVolume">Volume</label>
+                        <input type="text" id="videoAudioVolume" value="1.0" placeholder="1.0">
+                    </div>
+                </div>
+
                 <div class="field">
                     <label for="fontPath">Font File Path</label>
                     <input type="text" id="fontPath" value="" placeholder="font.ttf">
+                    <div class="hint">Only needed when using the built-in text overlays on top of a background video.</div>
                 </div>
 
                 <div class="row-2" style="margin-top: 12px;">
@@ -179,34 +196,13 @@ const Dashboard = `
                     </div>
                 </div>
 
-        <details class="group" id="videoSettingsGroup" >
-            <summary>Video Settings</summary>
+        <details class="group" id="ffmpegArgsGroup" open>
+            <summary>FFmpeg Args</summary>
             <div class="group-body">
-                <div class="row-2" style="margin-top: 12px;">
-                    <div class="field">
-                        <label for="videoCodec">Codec (-c:v)</label>
-                        <input type="text" id="videoCodec" value="libx264" placeholder="libx264">
-                    </div>
-                    <div class="field">
-                        <label for="videoPreset">Preset (-preset)</label>
-                        <input type="text" id="videoPreset" value="ultrafast" placeholder="ultrafast">
-                    </div>
-                </div>
-
-                <div class="row-2">
-                    <div class="field">
-                        <label for="videoBitrate">Bitrate (-b:v)</label>
-                        <input type="text" id="videoBitrate" value="6000k" placeholder="6000k">
-                    </div>
-                    <div class="field">
-                        <label for="videoMaxRate">Maxrate (-maxrate)</label>
-                        <input type="text" id="videoMaxRate" value="6000k" placeholder="6000k">
-                    </div>
-                </div>
-
                 <div class="field">
-                    <label for="videoBufSize">Bufsize (-bufsize)</label>
-                    <input type="text" id="videoBufSize" value="12000k" placeholder="12000k">
+                    <label for="ffmpegArgs">One argument per line</label>
+                    <textarea id="ffmpegArgs" placeholder="-c:v&#10;libx264&#10;-preset&#10;ultrafast"></textarea>
+                    <div class="hint">Managed inputs are injected automatically when the background video file or audio directory exists. Do not add the built-in video or internal audio input lines here.</div>
                 </div>
             </div>
         </details>
@@ -257,6 +253,44 @@ const Dashboard = `
     let isStreaming = false;
     let previewSongs = [];
     const DEFAULT_PROFILE_ID = 'default';
+    const DEFAULT_FFMPEG_ARGS = [
+        '-c:v',
+        'libx264',
+        '-preset',
+        'ultrafast',
+        '-b:v',
+        '6000k',
+        '-maxrate',
+        '6000k',
+        '-bufsize',
+        '12000k',
+        '-pix_fmt',
+        'yuv420p',
+        '-g',
+        '50',
+        '-c:a',
+        'aac',
+        '-b:a',
+        '128k',
+        '-ar',
+        '44100',
+        '-f',
+        'flv',
+        '-flvflags',
+        'no_duration_filesize',
+        '-rtmp_buffer',
+        '1000',
+        '-rtmp_live',
+        'live',
+        '-reconnect',
+        '1',
+        '-reconnect_at_eof',
+        '1',
+        '-reconnect_streamed',
+        '1',
+        '-reconnect_delay_max',
+        '5'
+    ].join('\n');
     let profileState = {
         selectedProfile: DEFAULT_PROFILE_ID,
         profiles: [
@@ -266,6 +300,9 @@ const Dashboard = `
                 stream_key: '',
                 stream_url_template: 'rtmp://10.16.0.165:1935/live/%s',
                 audio_dir: '',
+                enable_video_audio: false,
+                video_audio_volume: '1.0',
+                ffmpeg_args: DEFAULT_FFMPEG_ARGS,
                 playlist_order: 'normal',
                 stream_end_mode: 'forever',
                 end_after_minutes: '60',
@@ -286,6 +323,9 @@ const Dashboard = `
             stream_key: legacy.stream_key || '',
             stream_url_template: legacy.stream_url_template || 'rtmp://10.16.0.165:1935/live/%s',
             audio_dir: legacy.audio_dir || '',
+            enable_video_audio: !!legacy.enable_video_audio,
+            video_audio_volume: legacy.video_audio_volume || '1.0',
+            ffmpeg_args: legacy.ffmpeg_args || DEFAULT_FFMPEG_ARGS,
             playlist_order: legacy.playlist_order || 'normal',
             stream_end_mode: legacy.stream_end_mode || 'forever',
             end_after_minutes: legacy.end_after_minutes || '60',
@@ -313,6 +353,9 @@ const Dashboard = `
                     stream_key: String(raw.stream_key || legacy.stream_key || ''),
                     stream_url_template: String(raw.stream_url_template || legacy.stream_url_template || 'rtmp://10.16.0.165:1935/live/%s'),
                     audio_dir: String(raw.audio_dir || ''),
+                    enable_video_audio: !!raw.enable_video_audio,
+                    video_audio_volume: String(raw.video_audio_volume || legacy.video_audio_volume || '1.0'),
+                    ffmpeg_args: String(raw.ffmpeg_args || legacy.ffmpeg_args || DEFAULT_FFMPEG_ARGS),
                     playlist_order: String(raw.playlist_order || 'normal'),
                     stream_end_mode: String(raw.stream_end_mode || 'forever'),
                     end_after_minutes: String(raw.end_after_minutes || '60'),
@@ -366,6 +409,9 @@ const Dashboard = `
         document.getElementById('streamKey').value = p.stream_key || '';
         document.getElementById('streamUrlTemplate').value = p.stream_url_template || 'rtmp://10.16.0.165:1935/live/%s';
         document.getElementById('audioDir').value = p.audio_dir || '';
+        document.getElementById('enableVideoAudio').checked = !!p.enable_video_audio;
+        document.getElementById('videoAudioVolume').value = p.video_audio_volume || '1.0';
+        document.getElementById('ffmpegArgs').value = p.ffmpeg_args || DEFAULT_FFMPEG_ARGS;
         document.getElementById('playlistOrder').value = p.playlist_order || 'normal';
         document.getElementById('streamEndMode').value = p.stream_end_mode || 'forever';
         document.getElementById('endAfterMinutes').value = p.end_after_minutes || '60';
@@ -377,6 +423,7 @@ const Dashboard = `
         document.getElementById('nextSongLabel').value = p.next_song_label !== undefined ? p.next_song_label : 'Next song:';
         document.getElementById('profileName').value = p.name || 'Profile';
         updateEndAfterVisibility();
+        updateVideoAudioVolumeState();
     }
 
     function saveSelectedProfileFromForm() {
@@ -386,6 +433,9 @@ const Dashboard = `
         p.stream_key = document.getElementById('streamKey').value;
         p.stream_url_template = document.getElementById('streamUrlTemplate').value;
         p.audio_dir = document.getElementById('audioDir').value;
+        p.enable_video_audio = document.getElementById('enableVideoAudio').checked;
+        p.video_audio_volume = document.getElementById('videoAudioVolume').value;
+        p.ffmpeg_args = document.getElementById('ffmpegArgs').value;
         p.playlist_order = document.getElementById('playlistOrder').value;
         p.stream_end_mode = document.getElementById('streamEndMode').value;
         p.end_after_minutes = document.getElementById('endAfterMinutes').value;
@@ -406,6 +456,9 @@ const Dashboard = `
             stream_key: '',
             stream_url_template: 'rtmp://10.16.0.165:1935/live/%s',
             audio_dir: '',
+            enable_video_audio: false,
+            video_audio_volume: '1.0',
+            ffmpeg_args: DEFAULT_FFMPEG_ARGS,
             playlist_order: 'normal',
             stream_end_mode: 'forever',
             end_after_minutes: '60',
@@ -537,13 +590,15 @@ const Dashboard = `
         });
 
         await loadSettings();
-        document.getElementById('inputsPanel').querySelectorAll('input, select').forEach(function(el) {
+        document.getElementById('inputsPanel').querySelectorAll('input, select, textarea').forEach(function(el) {
             el.addEventListener('input', scheduleSettingsSave);
             el.addEventListener('change', scheduleSettingsSave);
         });
 
         document.getElementById('streamEndMode').addEventListener('change', updateEndAfterVisibility);
+        document.getElementById('enableVideoAudio').addEventListener('change', updateVideoAudioVolumeState);
         updateEndAfterVisibility();
+        updateVideoAudioVolumeState();
     });
 
     function initSidebar() {
@@ -572,6 +627,9 @@ const Dashboard = `
                 stream_key: s.stream_key || '',
                 stream_url_template: s.stream_url_template || '',
                 audio_dir: s.audio_dir || '',
+                enable_video_audio: !!s.enable_video_audio,
+                video_audio_volume: s.video_audio_volume || '1.0',
+                ffmpeg_args: s.ffmpeg_args || DEFAULT_FFMPEG_ARGS,
                 playlist_order: s.playlist_order || (s.shuffle_playlist ? 'shuffle' : 'normal'),
                 stream_end_mode: s.stream_end_mode || 'forever',
                 end_after_minutes: s.end_after_minutes || '60',
@@ -583,11 +641,6 @@ const Dashboard = `
                 next_song_label: s.next_song_label !== undefined ? s.next_song_label : 'Next song:'
             };
 
-            document.getElementById('videoCodec').value   = s.video_codec   || 'libx264';
-            document.getElementById('videoPreset').value  = s.video_preset  || 'ultrafast';
-            document.getElementById('videoBitrate').value = s.video_bitrate || '6000k';
-            document.getElementById('videoMaxRate').value = s.video_maxrate || '6000k';
-            document.getElementById('videoBufSize').value = s.video_bufsize || '12000k';
             syncProfileState(s.profiles, s.selected_profile, legacyProfile);
             updateEndAfterVisibility();
         } catch (e) {
@@ -599,6 +652,11 @@ const Dashboard = `
         const mode = document.getElementById('streamEndMode').value;
         const show = mode === 'duration';
         document.getElementById('endAfterField').style.display = show ? 'block' : 'none';
+    }
+
+    function updateVideoAudioVolumeState() {
+        const enabled = document.getElementById('enableVideoAudio').checked;
+        document.getElementById('videoAudioVolume').disabled = !enabled;
     }
 
     function scheduleSettingsSave() {
@@ -617,15 +675,13 @@ const Dashboard = `
             stream_url_template: activeProfile.stream_url_template || 'rtmp://10.16.0.165:1935/live/%s',
             video_path:        activeProfile.video_path,
             audio_dir:         activeProfile.audio_dir,
+            enable_video_audio: !!activeProfile.enable_video_audio,
+            video_audio_volume: activeProfile.video_audio_volume || '1.0',
+            ffmpeg_args:       activeProfile.ffmpeg_args || DEFAULT_FFMPEG_ARGS,
             playlist_order:    activeProfile.playlist_order,
             stream_end_mode:   activeProfile.stream_end_mode,
             end_after_minutes: activeProfile.end_after_minutes,
             font_path:         activeProfile.font_path,
-            video_codec:       document.getElementById('videoCodec').value,
-            video_preset:      document.getElementById('videoPreset').value,
-            video_bitrate:     document.getElementById('videoBitrate').value,
-            video_maxrate:     document.getElementById('videoMaxRate').value,
-            video_bufsize:     document.getElementById('videoBufSize').value,
             text_x:            activeProfile.text_x,
             text_y:            activeProfile.text_y,
             now_playing_label: activeProfile.now_playing_label,
@@ -709,7 +765,7 @@ const Dashboard = `
     }
 
     function setInputsDisabled(container, disabled) {
-        const fields = container.querySelectorAll('input, select');
+        const fields = container.querySelectorAll('input, select, textarea');
         for (const field of fields) {
             if (field.id === 'profileSelect' || field.id === 'profileName') {
                 field.disabled = false;
@@ -757,34 +813,44 @@ const Dashboard = `
             streamKey: document.getElementById('streamKey').value,
             streamUrlTemplate: document.getElementById('streamUrlTemplate').value,
             videoPath: document.getElementById('videoPath').value,
+            enableVideoAudio: document.getElementById('enableVideoAudio').checked,
+            videoAudioVolume: document.getElementById('videoAudioVolume').value,
             audioDir: document.getElementById('audioDir').value,
+            ffmpegArgs: document.getElementById('ffmpegArgs').value,
             playlistOrder: document.getElementById('playlistOrder').value,
             streamEndMode: document.getElementById('streamEndMode').value,
             endAfterMinutes: document.getElementById('endAfterMinutes').value,
             fontPath: document.getElementById('fontPath').value,
-            videoCodec: document.getElementById('videoCodec').value,
-            videoPreset: document.getElementById('videoPreset').value,
-            videoBitrate: document.getElementById('videoBitrate').value,
-            videoMaxRate: document.getElementById('videoMaxRate').value,
-            videoBufSize: document.getElementById('videoBufSize').value,
             textX: document.getElementById('textX').value,
             textY: document.getElementById('textY').value,
             nowPlayingLabel: document.getElementById('nowPlayingLabel').value,
             nextSongLabel: document.getElementById('nextSongLabel').value
         };
 
-        if (!payload.streamKey || !payload.videoPath || !payload.audioDir || !payload.fontPath) {
-            alert("Please fill in all fields.");
+        if (!payload.streamKey) {
+            alert("Please enter a stream key.");
+            return;
+        }
+        if (!payload.videoPath && !payload.audioDir) {
+            alert("Provide a background video path, an audio directory, or both.");
             return;
         }
 
         document.getElementById('startBtn').innerText = "Starting...";
 
-        await fetch('/api/start', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        });
+        try {
+            const res = await fetch('/api/start', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            if (!res.ok) {
+                const message = await res.text();
+                throw new Error(message || 'Failed to start stream');
+            }
+        } catch (e) {
+            alert('Failed to start stream: ' + e.message);
+        }
 
         setTimeout(fetchStatus, 500);
         document.getElementById('startBtn').innerText = "Start Live Stream";

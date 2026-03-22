@@ -96,22 +96,29 @@ Request body:
   "streamKey": "xxxx-xxxx-xxxx-xxxx",
   "streamUrlTemplate": "rtmp://host:1935/live/%s",
   "videoPath": "C:\\videos\\loop.mp4",
+  "enableVideoAudio": false,
+  "videoAudioVolume": "1.0",
   "audioDir": "C:\\music",
+  "ffmpegArgs": "-c:v\nlibx264\n-preset\nultrafast\n-c:a\naac\n-f\nflv",
   "playlistOrder": "normal",
   "streamEndMode": "forever",
   "endAfterMinutes": "60",
   "fontPath": "C:\\fonts\\font.ttf",
-  "videoCodec": "libx264",
-  "videoPreset": "ultrafast",
-  "videoBitrate": "6000k",
-  "videoMaxRate": "6000k",
-  "videoBufSize": "12000k",
   "textX": "30",
   "textY": "h-th-30",
   "nowPlayingLabel": "Now Playing:",
   "nextSongLabel": "Next song:"
 }
 ```
+
+Notes:
+
+- `ffmpegArgs` is parsed one line at a time, one FFmpeg argument per line.
+- `enableVideoAudio` enables the source audio track from the background video when one exists.
+- `videoAudioVolume` controls the background video audio gain before it is mixed. Default is `1.0`.
+- The app injects the managed media inputs automatically when the background video file or audio directory exists.
+- Managed `-i` lines for the built-in video file and internal audio source are ignored if they are included in `ffmpegArgs`.
+- Starting a stream requires a valid `streamKey` and at least one existing media source: `videoPath` or `audioDir`.
 
 ### POST /api/stop
 
@@ -176,7 +183,10 @@ Example profile object:
   "name": "Default",
   "stream_key": "xxxx-xxxx-xxxx-xxxx",
   "stream_url_template": "rtmp://host:1935/live/%s",
+  "enable_video_audio": false,
+  "video_audio_volume": "1.0",
   "audio_dir": "C:\\music",
+  "ffmpeg_args": "-c:v\nlibx264\n-preset\nultrafast\n-c:a\naac\n-f\nflv",
   "playlist_order": "normal",
   "stream_end_mode": "forever",
   "end_after_minutes": "60",
@@ -194,3 +204,4 @@ Example profile object:
 - `profileId` defaults to `default` when not provided.
 - Legacy top-level `stream_key` remains supported as a fallback for auto-start.
 - Legacy top-level `stream_url_template` remains supported as a fallback for auto-start.
+- `font_path` is only needed when using the built-in text overlay on top of a background video.

@@ -41,7 +41,10 @@ func (h *Handler) AutoStartFromSavedSettings() error {
 		StreamKey:         profile.StreamKey,
 		StreamURLTemplate: profile.StreamURLTemplate,
 		VideoPath:         profile.VideoPath,
+		EnableVideoAudio:  profile.EnableVideoAudio,
+		VideoAudioVolume:  profile.VideoAudioVolume,
 		AudioDir:          profile.AudioDir,
+		FFmpegArgs:        profile.FFmpegArgs,
 		PlaylistOrder:     profile.PlaylistOrder,
 		StreamEndMode:     profile.StreamEndMode,
 		EndAfterMinutes:   profile.EndAfterMinutes,
@@ -50,11 +53,6 @@ func (h *Handler) AutoStartFromSavedSettings() error {
 		TextY:             profile.TextY,
 		NowPlayingLabel:   profile.NowPlayingLabel,
 		NextSongLabel:     profile.NextSongLabel,
-		VideoCodec:        saved.VideoCodec,
-		VideoPreset:       saved.VideoPreset,
-		VideoBitrate:      saved.VideoBitrate,
-		VideoMaxRate:      saved.VideoMaxRate,
-		VideoBufSize:      saved.VideoBufSize,
 	}
 	if req.StreamKey == "" {
 		req.StreamKey = saved.StreamKey
@@ -63,8 +61,8 @@ func (h *Handler) AutoStartFromSavedSettings() error {
 		req.StreamURLTemplate = saved.StreamURLTemplate
 	}
 
-	if req.StreamKey == "" || req.VideoPath == "" || req.AudioDir == "" || req.FontPath == "" {
-		return errors.New("saved settings are incomplete: stream key, video path, audio directory, and font path are required")
+	if req.StreamKey == "" {
+		return errors.New("saved settings are incomplete: stream key is required")
 	}
 
 	return h.streamService.Start(req)
@@ -102,13 +100,16 @@ func (h *Handler) handleStartStream(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).SendString(err.Error())
 	}
 
-	if req.StreamKey == "" || req.VideoPath == "" || req.AudioDir == "" || req.FontPath == "" {
-		return c.Status(fiber.StatusBadRequest).SendString("All fields are required")
+	if req.StreamKey == "" {
+		return c.Status(fiber.StatusBadRequest).SendString("Stream key is required")
 	}
 
 	if err := h.streamService.Start(req); err != nil {
 		if errors.Is(err, stream.ErrAlreadyRunning) {
 			return c.Status(fiber.StatusConflict).SendString("Stream is already running")
+		}
+		if errors.Is(err, stream.ErrNoMediaInput) || errors.Is(err, stream.ErrNoSongsFound) {
+			return c.Status(fiber.StatusBadRequest).SendString(err.Error())
 		}
 		return c.Status(fiber.StatusInternalServerError).SendString(err.Error())
 	}
