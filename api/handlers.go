@@ -37,22 +37,30 @@ func (h *Handler) AutoStartFromSavedSettings() error {
 	}
 
 	req := stream.StartRequest{
-		StreamKey:       saved.StreamKey,
-		VideoPath:       profile.VideoPath,
-		AudioDir:        profile.AudioDir,
-		PlaylistOrder:   profile.PlaylistOrder,
-		StreamEndMode:   profile.StreamEndMode,
-		EndAfterMinutes: profile.EndAfterMinutes,
-		FontPath:        profile.FontPath,
-		TextX:           profile.TextX,
-		TextY:           profile.TextY,
-		NowPlayingLabel: profile.NowPlayingLabel,
-		NextSongLabel:   profile.NextSongLabel,
-		VideoCodec:      saved.VideoCodec,
-		VideoPreset:     saved.VideoPreset,
-		VideoBitrate:    saved.VideoBitrate,
-		VideoMaxRate:    saved.VideoMaxRate,
-		VideoBufSize:    saved.VideoBufSize,
+		ProfileID:         profile.ID,
+		StreamKey:         profile.StreamKey,
+		StreamURLTemplate: profile.StreamURLTemplate,
+		VideoPath:         profile.VideoPath,
+		AudioDir:          profile.AudioDir,
+		PlaylistOrder:     profile.PlaylistOrder,
+		StreamEndMode:     profile.StreamEndMode,
+		EndAfterMinutes:   profile.EndAfterMinutes,
+		FontPath:          profile.FontPath,
+		TextX:             profile.TextX,
+		TextY:             profile.TextY,
+		NowPlayingLabel:   profile.NowPlayingLabel,
+		NextSongLabel:     profile.NextSongLabel,
+		VideoCodec:        saved.VideoCodec,
+		VideoPreset:       saved.VideoPreset,
+		VideoBitrate:      saved.VideoBitrate,
+		VideoMaxRate:      saved.VideoMaxRate,
+		VideoBufSize:      saved.VideoBufSize,
+	}
+	if req.StreamKey == "" {
+		req.StreamKey = saved.StreamKey
+	}
+	if req.StreamURLTemplate == "" {
+		req.StreamURLTemplate = saved.StreamURLTemplate
 	}
 
 	if req.StreamKey == "" || req.VideoPath == "" || req.AudioDir == "" || req.FontPath == "" {
@@ -64,7 +72,7 @@ func (h *Handler) AutoStartFromSavedSettings() error {
 
 func (h *Handler) RegisterRoutes(app *fiber.App) {
 	app.Get("/", h.serveDashboard)
-	app.Get("/internal/audio", h.handleInternalAudio)
+	app.Get("/internal/audio/:profileId", h.handleInternalAudio)
 
 	api := app.Group("/api")
 	api.Post("/start", h.handleStartStream)
@@ -81,7 +89,11 @@ func (h *Handler) serveDashboard(c *fiber.Ctx) error {
 }
 
 func (h *Handler) handleStatus(c *fiber.Ctx) error {
-	return c.JSON(h.streamService.Status())
+	profileID := c.Query("profileId")
+	return c.JSON(fiber.Map{
+		"current": h.streamService.Status(profileID),
+		"streams": h.streamService.Statuses(),
+	})
 }
 
 func (h *Handler) handleStartStream(c *fiber.Ctx) error {
@@ -105,16 +117,26 @@ func (h *Handler) handleStartStream(c *fiber.Ctx) error {
 }
 
 func (h *Handler) handleStopStream(c *fiber.Ctx) error {
+	var req struct {
+		ProfileID string `json:"profileId"`
+	}
+	if len(c.Body()) > 0 {
+		if err := c.BodyParser(&req); err != nil {
+			return c.Status(fiber.StatusBadRequest).SendString(err.Error())
+		}
+	}
+
 	if h.cfg.EnableLogging {
 		fmt.Println("Stopping stream via web interface...")
 	}
-	h.streamService.Stop()
+	h.streamService.Stop(req.ProfileID)
 
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{"message": "Stream stopping"})
 }
 
 func (h *Handler) handleUpdatePlaylist(c *fiber.Ctx) error {
 	var req struct {
+		ProfileID       string  `json:"profileId"`
 		PlaylistOrder   *string `json:"playlistOrder"`
 		AudioDir        *string `json:"audioDir"`
 		StreamEndMode   *string `json:"streamEndMode"`
@@ -127,7 +149,7 @@ func (h *Handler) handleUpdatePlaylist(c *fiber.Ctx) error {
 		}
 	}
 
-	playlist, err := h.streamService.UpdatePlaylist(req.PlaylistOrder, req.AudioDir, req.StreamEndMode, req.EndAfterMinutes)
+	playlist, err := h.streamService.UpdatePlaylist(req.ProfileID, req.PlaylistOrder, req.AudioDir, req.StreamEndMode, req.EndAfterMinutes)
 	if err != nil {
 		if errors.Is(err, stream.ErrStreamNotRunning) {
 			return c.Status(fiber.StatusBadRequest).SendString("Stream is not running")
@@ -146,9 +168,10 @@ func (h *Handler) handleUpdatePlaylist(c *fiber.Ctx) error {
 }
 
 func (h *Handler) handleInternalAudio(c *fiber.Ctx) error {
+	profileID := c.Params("profileId")
 	c.Set("Content-Type", "audio/mpeg")
 	c.Context().SetBodyStreamWriter(func(w *bufio.Writer) {
-		_ = h.streamService.StreamAudio(w)
+		_ = h.streamService.StreamAudio(profileID, w)
 	})
 	return nil
 }

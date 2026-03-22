@@ -13,32 +13,35 @@ const filePath = "settings.yaml"
 const DefaultProfileID = "default"
 
 type StreamProfile struct {
-	ID              string `yaml:"id"                json:"id"`
-	Name            string `yaml:"name"              json:"name"`
-	AudioDir        string `yaml:"audio_dir"         json:"audio_dir"`
-	PlaylistOrder   string `yaml:"playlist_order"    json:"playlist_order"`
-	StreamEndMode   string `yaml:"stream_end_mode"   json:"stream_end_mode"`
-	EndAfterMinutes string `yaml:"end_after_minutes" json:"end_after_minutes"`
-	VideoPath       string `yaml:"video_path"        json:"video_path"`
-	FontPath        string `yaml:"font_path"         json:"font_path"`
-	TextX           string `yaml:"text_x"            json:"text_x"`
-	TextY           string `yaml:"text_y"            json:"text_y"`
-	NowPlayingLabel string `yaml:"now_playing_label" json:"now_playing_label"`
-	NextSongLabel   string `yaml:"next_song_label"   json:"next_song_label"`
+	ID                string `yaml:"id"                json:"id"`
+	Name              string `yaml:"name"              json:"name"`
+	StreamKey         string `yaml:"stream_key"        json:"stream_key"`
+	StreamURLTemplate string `yaml:"stream_url_template" json:"stream_url_template"`
+	AudioDir          string `yaml:"audio_dir"         json:"audio_dir"`
+	PlaylistOrder     string `yaml:"playlist_order"    json:"playlist_order"`
+	StreamEndMode     string `yaml:"stream_end_mode"   json:"stream_end_mode"`
+	EndAfterMinutes   string `yaml:"end_after_minutes" json:"end_after_minutes"`
+	VideoPath         string `yaml:"video_path"        json:"video_path"`
+	FontPath          string `yaml:"font_path"         json:"font_path"`
+	TextX             string `yaml:"text_x"            json:"text_x"`
+	TextY             string `yaml:"text_y"            json:"text_y"`
+	NowPlayingLabel   string `yaml:"now_playing_label" json:"now_playing_label"`
+	NextSongLabel     string `yaml:"next_song_label"   json:"next_song_label"`
 }
 
 // DashboardSettings holds all user-configurable dashboard fields.
 // It is persisted to settings.yaml in the working directory.
 type DashboardSettings struct {
-	Saved           bool            `yaml:"saved"             json:"saved"`
-	SelectedProfile string          `yaml:"selected_profile"  json:"selected_profile"`
-	Profiles        []StreamProfile `yaml:"profiles" json:"profiles"`
-	StreamKey       string          `yaml:"stream_key"        json:"stream_key"`
-	VideoCodec      string          `yaml:"video_codec"       json:"video_codec"`
-	VideoPreset     string          `yaml:"video_preset"      json:"video_preset"`
-	VideoBitrate    string          `yaml:"video_bitrate"     json:"video_bitrate"`
-	VideoMaxRate    string          `yaml:"video_maxrate"     json:"video_maxrate"`
-	VideoBufSize    string          `yaml:"video_bufsize"     json:"video_bufsize"`
+	Saved             bool            `yaml:"saved"             json:"saved"`
+	SelectedProfile   string          `yaml:"selected_profile"  json:"selected_profile"`
+	Profiles          []StreamProfile `yaml:"profiles" json:"profiles"`
+	StreamKey         string          `yaml:"stream_key"        json:"stream_key"`
+	StreamURLTemplate string          `yaml:"stream_url_template" json:"stream_url_template"`
+	VideoCodec        string          `yaml:"video_codec"       json:"video_codec"`
+	VideoPreset       string          `yaml:"video_preset"      json:"video_preset"`
+	VideoBitrate      string          `yaml:"video_bitrate"     json:"video_bitrate"`
+	VideoMaxRate      string          `yaml:"video_maxrate"     json:"video_maxrate"`
+	VideoBufSize      string          `yaml:"video_bufsize"     json:"video_bufsize"`
 }
 
 // Load reads settings.yaml. Returns zero-value settings (Saved=false) if the
@@ -97,8 +100,18 @@ func normalizeProfiles(s *DashboardSettings) {
 		return
 	}
 
+	legacyTemplate := strings.TrimSpace(s.StreamURLTemplate)
+	if legacyTemplate == "" {
+		legacyTemplate = "rtmp://10.16.0.165:1935/live/%s"
+	}
+
 	if len(s.Profiles) == 0 {
-		s.Profiles = []StreamProfile{buildDefaultProfile()}
+		p := buildDefaultProfile()
+		if strings.TrimSpace(s.StreamKey) != "" {
+			p.StreamKey = s.StreamKey
+		}
+		p.StreamURLTemplate = legacyTemplate
+		s.Profiles = []StreamProfile{p}
 	} else {
 		normalized := make([]StreamProfile, 0, len(s.Profiles)+1)
 		seen := map[string]bool{}
@@ -126,23 +139,30 @@ func normalizeProfiles(s *DashboardSettings) {
 			}
 
 			normalized = append(normalized, StreamProfile{
-				ID:              id,
-				Name:            name,
-				AudioDir:        p.AudioDir,
-				PlaylistOrder:   p.PlaylistOrder,
-				StreamEndMode:   p.StreamEndMode,
-				EndAfterMinutes: p.EndAfterMinutes,
-				VideoPath:       p.VideoPath,
-				FontPath:        p.FontPath,
-				TextX:           p.TextX,
-				TextY:           p.TextY,
-				NowPlayingLabel: p.NowPlayingLabel,
-				NextSongLabel:   p.NextSongLabel,
+				ID:                id,
+				Name:              name,
+				StreamKey:         p.StreamKey,
+				StreamURLTemplate: defaultString(p.StreamURLTemplate, legacyTemplate),
+				AudioDir:          p.AudioDir,
+				PlaylistOrder:     p.PlaylistOrder,
+				StreamEndMode:     p.StreamEndMode,
+				EndAfterMinutes:   p.EndAfterMinutes,
+				VideoPath:         p.VideoPath,
+				FontPath:          p.FontPath,
+				TextX:             p.TextX,
+				TextY:             p.TextY,
+				NowPlayingLabel:   p.NowPlayingLabel,
+				NextSongLabel:     p.NextSongLabel,
 			})
 		}
 
 		if !hasDefault {
-			normalized = append([]StreamProfile{buildDefaultProfile()}, normalized...)
+			p := buildDefaultProfile()
+			if strings.TrimSpace(s.StreamKey) != "" {
+				p.StreamKey = s.StreamKey
+			}
+			p.StreamURLTemplate = legacyTemplate
+			normalized = append([]StreamProfile{p}, normalized...)
 		}
 
 		s.Profiles = normalized
@@ -162,21 +182,35 @@ func normalizeProfiles(s *DashboardSettings) {
 	if !selectedFound {
 		s.SelectedProfile = DefaultProfileID
 	}
+
+	if strings.TrimSpace(s.StreamURLTemplate) == "" {
+		s.StreamURLTemplate = legacyTemplate
+	}
 }
 
 func buildDefaultProfile() StreamProfile {
 	return StreamProfile{
-		ID:              DefaultProfileID,
-		Name:            "Default",
-		AudioDir:        "",
-		PlaylistOrder:   "normal",
-		StreamEndMode:   "forever",
-		EndAfterMinutes: "60",
-		VideoPath:       "",
-		FontPath:        "",
-		TextX:           "30",
-		TextY:           "h-th-30",
-		NowPlayingLabel: "Now Playing:",
-		NextSongLabel:   "Next song:",
+		ID:                DefaultProfileID,
+		Name:              "Default",
+		StreamKey:         "",
+		StreamURLTemplate: "rtmp://10.16.0.165:1935/live/%s",
+		AudioDir:          "",
+		PlaylistOrder:     "normal",
+		StreamEndMode:     "forever",
+		EndAfterMinutes:   "60",
+		VideoPath:         "",
+		FontPath:          "",
+		TextX:             "30",
+		TextY:             "h-th-30",
+		NowPlayingLabel:   "Now Playing:",
+		NextSongLabel:     "Next song:",
 	}
+}
+
+func defaultString(value, fallback string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return fallback
+	}
+	return trimmed
 }

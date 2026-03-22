@@ -44,6 +44,7 @@ type PlaylistItem struct {
 }
 
 type Status struct {
+	ProfileID   string         `json:"profileId"`
 	IsRunning   bool           `json:"isRunning"`
 	CurrentSong string         `json:"currentSong"`
 	Songs       []PlaylistItem `json:"songs"`
@@ -53,22 +54,24 @@ type Status struct {
 }
 
 type StartRequest struct {
-	StreamKey       string `json:"streamKey"`
-	VideoPath       string `json:"videoPath"`
-	AudioDir        string `json:"audioDir"`
-	PlaylistOrder   string `json:"playlistOrder"`
-	StreamEndMode   string `json:"streamEndMode"`
-	EndAfterMinutes string `json:"endAfterMinutes"`
-	FontPath        string `json:"fontPath"`
-	VideoCodec      string `json:"videoCodec"`
-	VideoPreset     string `json:"videoPreset"`
-	VideoBitrate    string `json:"videoBitrate"`
-	VideoMaxRate    string `json:"videoMaxRate"`
-	VideoBufSize    string `json:"videoBufSize"`
-	TextX           string `json:"textX"`
-	TextY           string `json:"textY"`
-	NowPlayingLabel string `json:"nowPlayingLabel"`
-	NextSongLabel   string `json:"nextSongLabel"`
+	ProfileID         string `json:"profileId"`
+	StreamKey         string `json:"streamKey"`
+	StreamURLTemplate string `json:"streamUrlTemplate"`
+	VideoPath         string `json:"videoPath"`
+	AudioDir          string `json:"audioDir"`
+	PlaylistOrder     string `json:"playlistOrder"`
+	StreamEndMode     string `json:"streamEndMode"`
+	EndAfterMinutes   string `json:"endAfterMinutes"`
+	FontPath          string `json:"fontPath"`
+	VideoCodec        string `json:"videoCodec"`
+	VideoPreset       string `json:"videoPreset"`
+	VideoBitrate      string `json:"videoBitrate"`
+	VideoMaxRate      string `json:"videoMaxRate"`
+	VideoBufSize      string `json:"videoBufSize"`
+	TextX             string `json:"textX"`
+	TextY             string `json:"textY"`
+	NowPlayingLabel   string `json:"nowPlayingLabel"`
+	NextSongLabel     string `json:"nextSongLabel"`
 }
 
 type Song struct {

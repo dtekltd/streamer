@@ -14,9 +14,12 @@ import (
 
 func main() {
 	autoStart := flag.Bool("start", false, "start the stream from saved settings on app launch")
+	mode := flag.String("mode", "prod", "application mode: prod or dev")
+	port := flag.String("port", "8080", "http server port")
+	logs := flag.Bool("logs", true, "enable application logging")
 	flag.Parse()
 
-	cfg := config.Load()
+	cfg := config.New(*mode, *port, *logs)
 	listenAddr := ":" + cfg.ServerPort
 
 	app := fiber.New(fiber.Config{

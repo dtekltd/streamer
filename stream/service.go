@@ -7,13 +7,16 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
+	"unicode"
 
 	"streamer/config"
 )
@@ -22,22 +25,35 @@ var ErrAlreadyRunning = errors.New("stream is already running")
 var ErrStreamNotRunning = errors.New("stream is not running")
 var ErrNoSongsFound = errors.New("no mp3 files found in directory")
 
+const DefaultProfileID = "default"
+
 type Service struct {
-	state *StreamState
-	cfg   *config.AppConfig
+	cfg     *config.AppConfig
+	mu      sync.Mutex
+	streams map[string]*StreamState
 }
 
 func NewService(cfg *config.AppConfig) *Service {
-	return &Service{state: &StreamState{}, cfg: cfg}
+	return &Service{streams: map[string]*StreamState{}, cfg: cfg}
 }
 
 func (s *Service) Start(req StartRequest) error {
-	songs := s.state.songs
-	playlistOrder := normalizePlaylistOrder(req.PlaylistOrder)
+	profileID := normalizeProfileID(req.ProfileID)
+	state := s.getOrCreateState(profileID)
 
-	// Only re-prepare the playlist if the order has changed or if we don't have a playlist loaded yet.
-	if playlistOrder != s.state.playlistOrder || len(songs) == 0 {
-		s.logf("Update playlist order: %s (previous: %s, songs: %d)\n", playlistOrder, s.state.playlistOrder, len(songs))
+	playlistOrder := normalizePlaylistOrder(req.PlaylistOrder)
+	state.mu.Lock()
+	songs := append([]Song(nil), state.songs...)
+	existingOrder := state.playlistOrder
+	alreadyRunning := state.isRunning
+	state.mu.Unlock()
+
+	if alreadyRunning {
+		return ErrAlreadyRunning
+	}
+
+	if playlistOrder != existingOrder || len(songs) == 0 {
+		s.logf("Update playlist for %s: %s (previous: %s, songs: %d)\n", profileID, playlistOrder, existingOrder, len(songs))
 		var err error
 		songs, err = prepareAudioList(req.AudioDir, playlistOrder)
 		if err != nil {
@@ -48,24 +64,7 @@ func (s *Service) Start(req StartRequest) error {
 		}
 	}
 
-	s.state.mu.Lock()
-	if s.state.isRunning {
-		s.state.mu.Unlock()
-		return ErrAlreadyRunning
-	}
-
 	ctx, cancel := context.WithCancel(context.Background())
-	s.state.isRunning = true
-	s.state.playlistOrder = playlistOrder
-	s.state.audioDir = req.AudioDir
-	s.state.songs = songs
-	s.state.currentSong = ""
-	s.state.nextSong = ""
-	s.state.nowPlayingLabel = normalizeNowPlayingLabel(req.NowPlayingLabel)
-	s.state.nextSongLabel = normalizeNextSongLabel(req.NextSongLabel)
-	s.state.cancel = cancel
-	s.state.mu.Unlock()
-
 	textX := strings.TrimSpace(req.TextX)
 	if textX == "" {
 		textX = "30"
@@ -81,44 +80,52 @@ func (s *Service) Start(req StartRequest) error {
 	videoBitrate := defaultString(req.VideoBitrate, "6000k")
 	videoMaxRate := defaultString(req.VideoMaxRate, "6000k")
 	videoBufSize := defaultString(req.VideoBufSize, "12000k")
+	streamURLTemplate := defaultString(req.StreamURLTemplate, "rtmp://10.16.0.165:1935/live/%s")
 	streamEndMode := normalizeStreamEndMode(req.StreamEndMode)
 	endAfter := parseEndAfterMinutes(req.EndAfterMinutes)
 
-	s.state.mu.Lock()
-	s.state.streamEndMode = streamEndMode
-	s.state.endAfter = endAfter
-	s.state.startedAt = time.Now()
-	s.state.mu.Unlock()
+	state.mu.Lock()
+	state.isRunning = true
+	state.playlistOrder = playlistOrder
+	state.audioDir = req.AudioDir
+	state.songs = songs
+	state.currentSong = ""
+	state.nextSong = ""
+	state.nowPlayingLabel = normalizeNowPlayingLabel(req.NowPlayingLabel)
+	state.nextSongLabel = normalizeNextSongLabel(req.NextSongLabel)
+	state.streamEndMode = streamEndMode
+	state.endAfter = endAfter
+	state.startedAt = time.Now()
+	state.cancel = cancel
+	state.mu.Unlock()
 
-	go s.runStream(ctx, req.StreamKey, req.VideoPath, req.FontPath, textX, textY, videoCodec, videoPreset, videoBitrate, videoMaxRate, videoBufSize)
+	go s.runStream(ctx, profileID, req.StreamKey, streamURLTemplate, req.VideoPath, req.FontPath, textX, textY, videoCodec, videoPreset, videoBitrate, videoMaxRate, videoBufSize)
 	return nil
 }
 
-func (s *Service) UpdatePlaylist(orderOverride, audioDirOverride, streamEndModeOverride, endAfterMinutesOverride *string) ([]PlaylistItem, error) {
-	s.state.mu.Lock()
-	// Allow updating playlist order, audio directory, and stream end mode on the fly without restarting the stream
-	// if !s.state.isRunning {
-	// 	s.state.mu.Unlock()
-	// 	return 0, ErrStreamNotRunning
-	// }
+func (s *Service) UpdatePlaylist(profileID string, orderOverride, audioDirOverride, streamEndModeOverride, endAfterMinutesOverride *string) ([]PlaylistItem, error) {
+	profileID = normalizeProfileID(profileID)
+	state := s.getOrCreateState(profileID)
+
+	state.mu.Lock()
 	if orderOverride != nil {
-		s.state.playlistOrder = normalizePlaylistOrder(*orderOverride)
+		state.playlistOrder = normalizePlaylistOrder(*orderOverride)
 	}
 	if audioDirOverride != nil {
 		audioDir := strings.TrimSpace(*audioDirOverride)
 		if audioDir != "" {
-			s.state.audioDir = audioDir
+			state.audioDir = audioDir
 		}
 	}
 	if streamEndModeOverride != nil {
-		s.state.streamEndMode = normalizeStreamEndMode(*streamEndModeOverride)
+		state.streamEndMode = normalizeStreamEndMode(*streamEndModeOverride)
 	}
 	if endAfterMinutesOverride != nil {
-		s.state.endAfter = parseEndAfterMinutes(*endAfterMinutesOverride)
+		state.endAfter = parseEndAfterMinutes(*endAfterMinutesOverride)
 	}
-	audioDir := s.state.audioDir
-	playlistOrder := s.state.playlistOrder
-	s.state.mu.Unlock()
+	audioDir := state.audioDir
+	playlistOrder := state.playlistOrder
+	state.mu.Unlock()
 
 	songs, err := prepareAudioList(audioDir, playlistOrder)
 	if err != nil {
@@ -128,13 +135,9 @@ func (s *Service) UpdatePlaylist(orderOverride, audioDirOverride, streamEndModeO
 		return nil, ErrNoSongsFound
 	}
 
-	s.state.mu.Lock()
-	// if !s.state.isRunning {
-	// 	s.state.mu.Unlock()
-	// 	return 0, ErrStreamNotRunning
-	// }
-	s.state.songs = songs
-	s.state.mu.Unlock()
+	state.mu.Lock()
+	state.songs = songs
+	state.mu.Unlock()
 
 	playlist := make([]PlaylistItem, 0, len(songs))
 	var startOffset time.Duration
@@ -153,22 +156,33 @@ func (s *Service) UpdatePlaylist(orderOverride, audioDirOverride, streamEndModeO
 	return playlist, nil
 }
 
-func (s *Service) Stop() {
-	s.state.mu.Lock()
-	if s.state.isRunning && s.state.cancel != nil {
-		s.state.cancel()
+func (s *Service) Stop(profileID string) {
+	state := s.getState(normalizeProfileID(profileID))
+	if state == nil {
+		return
 	}
-	s.state.mu.Unlock()
+
+	state.mu.Lock()
+	if state.isRunning && state.cancel != nil {
+		state.cancel()
+	}
+	state.mu.Unlock()
 }
 
-func (s *Service) Status() Status {
-	s.state.mu.Lock()
-	defer s.state.mu.Unlock()
+func (s *Service) Status(profileID string) Status {
+	profileID = normalizeProfileID(profileID)
+	state := s.getState(profileID)
+	if state == nil {
+		return Status{ProfileID: profileID}
+	}
 
-	playlist := make([]PlaylistItem, 0, len(s.state.songs))
+	state.mu.Lock()
+	defer state.mu.Unlock()
+
+	playlist := make([]PlaylistItem, 0, len(state.songs))
 	var startOffset time.Duration
 	songIndex := 0
-	for i, song := range s.state.songs {
+	for i, song := range state.songs {
 		startText := formatClock(startOffset)
 		durationText := formatClock(song.Duration)
 		playlist = append(playlist, PlaylistItem{
@@ -177,41 +191,70 @@ func (s *Service) Status() Status {
 			Duration: durationText,
 			Display:  fmt.Sprintf("[%s] %s", startText, song.Name),
 		})
-		if song.Name == s.state.currentSong {
+		if song.Name == state.currentSong {
 			songIndex = i + 1
 		}
 		startOffset += song.Duration
 	}
 
 	return Status{
-		IsRunning:   s.state.isRunning,
-		CurrentSong: s.state.currentSong,
+		ProfileID:   profileID,
+		IsRunning:   state.isRunning,
+		CurrentSong: state.currentSong,
 		Songs:       playlist,
-		StartedAt:   s.state.startedAt,
+		StartedAt:   state.startedAt,
 		SongIndex:   songIndex,
-		SongTotal:   len(s.state.songs),
+		SongTotal:   len(state.songs),
 	}
 }
 
-func (s *Service) StreamAudio(w *bufio.Writer) error {
+func (s *Service) Statuses() []Status {
+	s.mu.Lock()
+	ids := make([]string, 0, len(s.streams))
+	for profileID := range s.streams {
+		ids = append(ids, profileID)
+	}
+	s.mu.Unlock()
+
+	sort.Strings(ids)
+	statuses := make([]Status, 0, len(ids))
+	for _, profileID := range ids {
+		status := s.Status(profileID)
+		if status.IsRunning {
+			statuses = append(statuses, status)
+		}
+	}
+
+	return statuses
+}
+
+func (s *Service) StreamAudio(profileID string, w *bufio.Writer) error {
+	profileID = normalizeProfileID(profileID)
+	nowFile, nextFile := overlayFilePaths(profileID)
+
 	for {
-		s.state.mu.Lock()
-		songs := append([]Song(nil), s.state.songs...)
-		isRunning := s.state.isRunning
-		nowPlayingLabel := s.state.nowPlayingLabel
-		nextSongLabel := s.state.nextSongLabel
-		streamEndMode := s.state.streamEndMode
-		endAfter := s.state.endAfter
-		startedAt := s.state.startedAt
-		s.state.mu.Unlock()
+		state := s.getState(profileID)
+		if state == nil {
+			return nil
+		}
+
+		state.mu.Lock()
+		songs := append([]Song(nil), state.songs...)
+		isRunning := state.isRunning
+		nowPlayingLabel := state.nowPlayingLabel
+		nextSongLabel := state.nextSongLabel
+		streamEndMode := state.streamEndMode
+		endAfter := state.endAfter
+		startedAt := state.startedAt
+		state.mu.Unlock()
 
 		if !isRunning {
 			return nil
 		}
 
 		if streamEndMode == StreamEndDuration && endAfter > 0 && time.Since(startedAt) >= endAfter {
-			s.logln("Configured stream duration reached. Will stop the stream after the current song finishes.")
-			s.Stop()
+			s.logf("Configured stream duration reached for %s. Will stop the stream after the current song finishes.\n", profileID)
+			s.Stop(profileID)
 			return nil
 		}
 
@@ -222,33 +265,32 @@ func (s *Service) StreamAudio(w *bufio.Writer) error {
 
 		for idx, song := range songs {
 			if streamEndMode == StreamEndDuration && endAfter > 0 && time.Since(startedAt) >= endAfter {
-				s.logln("Configured stream duration reached. Will stop the stream after the current song finishes.")
-				s.Stop()
+				s.logf("Configured stream duration reached for %s. Will stop the stream after the current song finishes.\n", profileID)
+				s.Stop(profileID)
 				return nil
 			}
 
 			nextSongName := songs[(idx+1)%len(songs)].Name
 
-			s.state.mu.Lock()
-			if !s.state.isRunning {
-				s.state.mu.Unlock()
+			state.mu.Lock()
+			if !state.isRunning {
+				state.mu.Unlock()
 				return nil
 			}
-			s.state.currentSong = song.Name
-			s.state.nextSong = nextSongName
-			s.state.mu.Unlock()
+			state.currentSong = song.Name
+			state.nextSong = nextSongName
+			state.mu.Unlock()
 
-			// Start the stopwatch!
 			start := time.Now()
 
 			nowText := formatNowPlayingText(nowPlayingLabel, song.Name)
-			if err := os.WriteFile(nowPlayingFile, []byte(nowText), 0644); err != nil {
-				s.logf("Failed to update now playing file: %v\n", err)
+			if err := os.WriteFile(nowFile, []byte(nowText), 0644); err != nil {
+				s.logf("Failed to update now playing file for %s: %v\n", profileID, err)
 			}
 
 			nextText := formatNextSongText(nextSongLabel, nextSongName)
-			if err := os.WriteFile(nextPlayingFile, []byte(nextText), 0644); err != nil {
-				s.logf("Failed to update next song file: %v\n", err)
+			if err := os.WriteFile(nextFile, []byte(nextText), 0644); err != nil {
+				s.logf("Failed to update next song file for %s: %v\n", profileID, err)
 			}
 
 			file, err := os.Open(song.Path)
@@ -264,7 +306,6 @@ func (s *Service) StreamAudio(w *bufio.Writer) error {
 				return copyErr
 			}
 
-			// Look at the stopwatch. Wait out the remaining length of the song,
 			elapsed := time.Since(start)
 			if elapsed < song.Duration {
 				remaining := song.Duration - elapsed
@@ -277,54 +318,42 @@ func (s *Service) StreamAudio(w *bufio.Writer) error {
 		}
 
 		if streamEndMode == StreamEndAllSongs {
-			s.logln("All songs have been played once. Will stop the stream after the current song finishes.")
-			s.Stop()
+			s.logf("All songs have been played once for %s. Will stop the stream after the current song finishes.\n", profileID)
+			s.Stop(profileID)
 			return nil
 		}
 	}
 }
 
-func (s *Service) markEnding() {
-	s.state.mu.Lock()
-	defer s.state.mu.Unlock()
-	s.state.isEnding = true
-}
+func (s *Service) runStream(ctx context.Context, profileID, streamKey, streamURLTemplate, videoFile, fontFile, textX, textY, videoCodec, videoPreset, videoBitrate, videoMaxRate, videoBufSize string) {
+	state := s.getOrCreateState(profileID)
+	nowFile, nextFile := overlayFilePaths(profileID)
 
-func (s *Service) runStream(ctx context.Context, streamKey, videoFile, fontFile, textX, textY, videoCodec, videoPreset, videoBitrate, videoMaxRate, videoBufSize string) {
 	defer func() {
-		s.state.mu.Lock()
-		s.state.isRunning = false
-		s.state.currentSong = ""
-		s.state.nextSong = ""
-		s.state.streamEndMode = ""
-		s.state.endAfter = 0
-		s.state.startedAt = time.Time{}
-		s.state.nowPlayingLabel = ""
-		s.state.nextSongLabel = ""
-		// Keep the last loaded playlist in memory so that if the user clicks "Start Stream" again
-		// without changing settings, we can start immediately without having to re-scan the audio
-		// directory and re-prepare the playlist.
-		// s.state.playlistOrder = ""
-		// s.state.songs = nil
-		s.state.audioDir = ""
-		s.state.cancel = nil
-		s.state.mu.Unlock()
-		os.Remove(nowPlayingFile)
-		os.Remove(nextPlayingFile)
-		s.logln("Stream fully stopped and cleaned up.")
+		state.mu.Lock()
+		state.isRunning = false
+		state.currentSong = ""
+		state.nextSong = ""
+		state.streamEndMode = ""
+		state.endAfter = 0
+		state.startedAt = time.Time{}
+		state.nowPlayingLabel = ""
+		state.nextSongLabel = ""
+		state.audioDir = ""
+		state.cancel = nil
+		state.mu.Unlock()
+		os.Remove(nowFile)
+		os.Remove(nextFile)
+		s.logf("Stream %s fully stopped and cleaned up.\n", profileID)
 	}()
 
 	args := []string{
 		"-re",
 		"-stream_loop", "-1",
 		"-i", videoFile,
-		"-i", fmt.Sprintf("http://127.0.0.1:%s/internal/audio", s.cfg.ServerPort),
+		"-i", fmt.Sprintf("http://127.0.0.1:%s/internal/audio/%s", s.cfg.ServerPort, url.PathEscape(profileID)),
 		"-map", "1:a",
 		"-c:v", videoCodec,
-		// "-preset", "veryfast",
-		// "-b:v", "13500k", // Set target bitrate to 13.5 Mbps
-		// "-maxrate", "13500k", // Cap the maximum bitrate at 13.5 Mbps
-		// "-bufsize", "27000k", // Set buffer size to double the maxrate (Standard practice)
 		"-preset", videoPreset,
 		"-b:v", videoBitrate,
 		"-maxrate", videoMaxRate,
@@ -335,7 +364,7 @@ func (s *Service) runStream(ctx context.Context, streamKey, videoFile, fontFile,
 		"-b:a", "128k",
 		"-ar", "44100",
 		"-f", "flv",
-		"-flvflags", "no_duration_filesize", // Don't update duration/size
+		"-flvflags", "no_duration_filesize",
 		"-rtmp_buffer", "1000",
 		"-rtmp_live", "live",
 		"-reconnect", "1",
@@ -344,32 +373,29 @@ func (s *Service) runStream(ctx context.Context, streamKey, videoFile, fontFile,
 		"-reconnect_delay_max", "5",
 	}
 
-	if nowPlayingLabel, nextSongLabel := s.getOverlayLabels(); nowPlayingLabel != "" {
+	if nowPlayingLabel, nextSongLabel := s.getOverlayLabels(state); nowPlayingLabel != "" {
 		nowInitialText := formatNowPlayingText(nowPlayingLabel, "Starting...")
 		nextInitialText := formatNextSongText(nextSongLabel, "")
 
-		// Ensure drawtext can read a non-empty file before FFmpeg starts.
-		if err := os.WriteFile(nowPlayingFile, []byte(nowInitialText), 0644); err != nil {
-			s.logf("Failed to initialize now playing file: %v\n", err)
+		if err := os.WriteFile(nowFile, []byte(nowInitialText), 0644); err != nil {
+			s.logf("Failed to initialize now playing file for %s: %v\n", profileID, err)
 		}
-		if err := os.WriteFile(nextPlayingFile, []byte(nextInitialText), 0644); err != nil {
-			s.logf("Failed to initialize next song file: %v\n", err)
+		if err := os.WriteFile(nextFile, []byte(nextInitialText), 0644); err != nil {
+			s.logf("Failed to initialize next song file for %s: %v\n", profileID, err)
 		}
 
-		safeFontPath := filepath.ToSlash(fontFile)                  // Convert Windows backslashes to forward slashes
-		safeFontPath = strings.Replace(safeFontPath, ":", "\\:", 1) // Escape the Windows drive colon (e.g., turns "E:/" into "E\:/")
+		safeFontPath := filepath.ToSlash(fontFile)
+		safeFontPath = strings.Replace(safeFontPath, ":", "\\:", 1)
 		nowTextY := textY
 		nextTextY := fmt.Sprintf("(%s)+55", textY)
 
-		// Draw the Now Playing text (large and white)
-		drawNowPlaying := fmt.Sprintf("drawtext=fontfile='%s':textfile='%s':reload=1:fontcolor=white:fontsize=40:box=1:boxcolor=black@0.6:boxborderw=10:x=%s:y=%s", safeFontPath, nowPlayingFile, textX, nowTextY)
+		drawNowPlaying := fmt.Sprintf("drawtext=fontfile='%s':textfile='%s':reload=1:fontcolor=white:fontsize=40:box=1:boxcolor=black@0.6:boxborderw=10:x=%s:y=%s", safeFontPath, nowFile, textX, nowTextY)
 
 		combinedFilter := ""
 		if normalizeNextSongLabel(nextSongLabel) == "" {
 			combinedFilter = fmt.Sprintf("[0:v]%s[v]", drawNowPlaying)
 		} else {
-			// Draw the Next Song text (smaller and light gray)
-			drawNextPlaying := fmt.Sprintf("drawtext=fontfile='%s':textfile='%s':reload=1:fontcolor=white@0.7:fontsize=30:box=1:boxcolor=black@0.6:boxborderw=10:x=%s:y=%s", safeFontPath, nextPlayingFile, textX, nextTextY)
+			drawNextPlaying := fmt.Sprintf("drawtext=fontfile='%s':textfile='%s':reload=1:fontcolor=white@0.7:fontsize=30:box=1:boxcolor=black@0.6:boxborderw=10:x=%s:y=%s", safeFontPath, nextFile, textX, nextTextY)
 			combinedFilter = fmt.Sprintf("[0:v]%s,%s[v]", drawNowPlaying, drawNextPlaying)
 		}
 		args = append(args, []string{
@@ -377,40 +403,30 @@ func (s *Service) runStream(ctx context.Context, streamKey, videoFile, fontFile,
 			"-map", "[v]",
 		}...)
 	} else {
-		// If no overlay labels are set, we can skip the filter_complex and drawtext setup entirely
-		// and just pass through the video stream as-is for maximum performance.
 		args = append(args, "-map", "0:v")
 	}
 
-	args = append(args, fmt.Sprintf(s.cfg.StreamURLTemplate, streamKey))
-	// utils.Dump("args:", args)
+	args = append(args, fmt.Sprintf(streamURLTemplate, streamKey))
 
-	// Restart if FFmpeg crashes due to a network blip or YouTube reset,
-	// the stream will go down until the user manually restarts it.
-	// To create a more resilient stream that can automatically recover from transient errors,
-	// we wrap the FFmpeg execution in a loop that will attempt to restart it if it exits unexpectedly.
-	// The loop will only break if the context is canceled, which happens when the user clicks "Stop Stream"
-	// in the web interface.
 	for {
-		s.logln("▶️ Starting FFmpeg encoder...")
+		s.logf("Starting FFmpeg encoder for profile %s...\n", profileID)
 		cmd := exec.CommandContext(ctx, "ffmpeg", args...)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 
 		err := cmd.Run()
-
-		// Check if the context was canceled, which indicates a graceful shutdown request from the web interface
 		if ctx.Err() != nil {
-			s.logln("🛑 Stream has been safely stopped from the web interface.")
-			break // Exit the loop to allow cleanup and shutdown
+			s.logf("Stream %s has been safely stopped from the web interface.\n", profileID)
+			break
 		}
 
-		// If the code reaches this point, it means FFmpeg crashed unexpectedly!
-		s.logf("\n⚠️ Warning (%v)!\n", err)
-		s.logln("🔄 Attempting to reconnect automatically in 5 seconds...")
+		s.logf("Warning for %s (%v)!\n", profileID, err)
+		s.logln("Attempting to reconnect automatically in 5 seconds...")
 
-		if s.state.streamEndMode == StreamEndForever {
-			// Wait 5 seconds for the network to stabilize or for YouTube to reset the stream before pushing again
+		state.mu.Lock()
+		streamEndMode := state.streamEndMode
+		state.mu.Unlock()
+		if streamEndMode == StreamEndForever {
 			time.Sleep(5 * time.Second)
 		} else {
 			s.logln("Stream end mode is not set to 'forever', so will not attempt to restart the stream.")
@@ -430,11 +446,9 @@ func prepareAudioList(dir string, playlistOrder string) ([]Song, error) {
 		if !entry.IsDir() && strings.HasSuffix(strings.ToLower(entry.Name()), ".mp3") {
 			absPath, _ := filepath.Abs(filepath.Join(dir, entry.Name()))
 			cleanName := strings.TrimSuffix(entry.Name(), filepath.Ext(entry.Name()))
-			// Remove prefixes like "01." or "01 - "
 			cleanName = strings.TrimSpace(strings.TrimLeftFunc(cleanName, func(r rune) bool {
 				return (r >= '0' && r <= '9') || r == '.' || r == '-' || r == ' '
 			}))
-			// Calculate the exact duration of the MP3
 			duration, err := getDuration(absPath)
 			if err != nil {
 				continue
@@ -444,7 +458,6 @@ func prepareAudioList(dir string, playlistOrder string) ([]Song, error) {
 	}
 
 	sortSongsByOrder(songs, playlistOrder)
-
 	return songs, nil
 }
 
@@ -466,7 +479,6 @@ func sortSongsByOrder(songs []Song, playlistOrder string) {
 			songs[i], songs[j] = songs[j], songs[i]
 		})
 	case PlaylistOrderNormal:
-		// keep sequence as loaded from directory
 	}
 }
 
@@ -493,7 +505,6 @@ func formatClock(d time.Duration) string {
 	return fmt.Sprintf("%02d:%02d", minutes, seconds)
 }
 
-// getDuration uses ffprobe to get the exact duration of an audio file
 func getDuration(filePath string) (time.Duration, error) {
 	cmd := exec.Command("ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", filePath)
 	out, err := cmd.Output()
@@ -508,7 +519,6 @@ func getDuration(filePath string) (time.Duration, error) {
 	return time.Duration(seconds * float64(time.Second)), nil
 }
 
-// skipID3Tags checks if an MP3 file has metadata at the beginning and fast-forwards past it.
 func skipID3Tags(file *os.File) {
 	header := make([]byte, 10)
 	_, err := file.Read(header)
@@ -517,32 +527,22 @@ func skipID3Tags(file *os.File) {
 		return
 	}
 
-	// ID3v2 tags always start with the letters "ID3"
 	if string(header[:3]) == "ID3" {
-		// ID3 uses a special 32-bit "syncsafe" integer to declare its size.
-		// We calculate the exact size of the metadata block here:
 		size := (int(header[6]) << 21) | (int(header[7]) << 14) | (int(header[8]) << 7) | int(header[9])
-
-		// Fast-forward the file exactly past the metadata (size + 10 bytes for the header itself)
 		file.Seek(int64(size+10), io.SeekStart)
 	} else {
-		// No ID3 tag found, rewind back to the very beginning of the audio
 		file.Seek(0, io.SeekStart)
 	}
 }
 
-func (s *Service) getOverlayLabels() (string, string) {
-	s.state.mu.Lock()
-	defer s.state.mu.Unlock()
-	return normalizeNowPlayingLabel(s.state.nowPlayingLabel), normalizeNextSongLabel(s.state.nextSongLabel)
+func (s *Service) getOverlayLabels(state *StreamState) (string, string) {
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	return normalizeNowPlayingLabel(state.nowPlayingLabel), normalizeNextSongLabel(state.nextSongLabel)
 }
 
 func normalizeNowPlayingLabel(label string) string {
-	trimmed := strings.TrimSpace(label)
-	// if trimmed == "" {
-	// 	return "Now Playing:"
-	// }
-	return trimmed
+	return strings.TrimSpace(label)
 }
 
 func formatNowPlayingText(label, song string) string {
@@ -612,4 +612,60 @@ func parseEndAfterMinutes(value string) time.Duration {
 	}
 
 	return time.Duration(minutes) * time.Minute
+}
+
+func normalizeProfileID(profileID string) string {
+	clean := strings.TrimSpace(profileID)
+	if clean == "" {
+		return DefaultProfileID
+	}
+	return clean
+}
+
+func overlayFilePaths(profileID string) (string, string) {
+	safeID := sanitizeFileToken(profileID)
+	return "now_playing_" + safeID + ".txt", "next_playing_" + safeID + ".txt"
+}
+
+func sanitizeFileToken(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return DefaultProfileID
+	}
+
+	var b strings.Builder
+	for _, r := range trimmed {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '-' || r == '_' {
+			b.WriteRune(r)
+		} else {
+			b.WriteRune('_')
+		}
+	}
+	result := b.String()
+	if result == "" {
+		return DefaultProfileID
+	}
+	return result
+}
+
+func (s *Service) getOrCreateState(profileID string) *StreamState {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if st, ok := s.streams[profileID]; ok {
+		return st
+	}
+
+	st := &StreamState{
+		playlistOrder: PlaylistOrderNormal,
+		streamEndMode: StreamEndForever,
+	}
+	s.streams[profileID] = st
+	return st
+}
+
+func (s *Service) getState(profileID string) *StreamState {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.streams[profileID]
 }

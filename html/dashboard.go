@@ -50,6 +50,13 @@ const Dashboard = `
         .playlist-list { margin: 0; padding-left: 25px; max-height: 400px; overflow: auto; }
         .playlist-list li { margin: 5px 0; color: #444; }
         .playlist-list li.playing { color: #28a745; font-weight: bold; }
+        .streams-list { margin: 0; padding-left: 0; list-style: none; display: grid; gap: 10px; }
+        .streams-list li { border: 1px solid #d7dde5; border-radius: 8px; background: #fff; padding: 10px; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+        .streams-meta { min-width: 0; }
+        .streams-meta strong { display: block; color: #1f2a37; }
+        .streams-meta span { color: #5e6672; font-size: 13px; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .btn-stop-mini { background: #dc3545; border: none; color: white; border-radius: 6px; padding: 8px 10px; font-size: 12px; cursor: pointer; font-weight: 700; }
+        .btn-stop-mini:hover { background: #c82333; }
         .saved-indicator { font-size: 12px; color: #28a745; opacity: 0; transition: opacity 0.4s; margin-left: 8px; vertical-align: middle; }
         .sidebar-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
         .sidebar-header h1 { flex: 1; }
@@ -91,8 +98,11 @@ const Dashboard = `
 
         <div class="sidebar-body" id="sidebarBody">
         <div id="inputsPanel">
-        <label for="streamKey">YouTube Stream Key</label>
+        <label for="streamKey">Stream Key</label>
         <input type="text" id="streamKey" value="" placeholder="xxxx-xxxx-xxxx-xxxx">
+
+        <label for="streamUrlTemplate">Stream URL</label>
+        <input type="text" id="streamUrlTemplate" value="rtmp://10.16.0.165:1935/live/%s" placeholder="rtmp://host:1935/live/%s">
 
         <div class="profile-row">
             <div class="field">
@@ -208,6 +218,14 @@ const Dashboard = `
         <h2 style="margin:0 0 6px;">Streaming Console</h2>
         <p class="subtitle">Start and monitor stream from here.</p>
 
+    <div class="playlist-box" id="runningStreamsBox" style="display:none; margin-top: 0;">
+        <div class="playlist-header">
+            <h4>Live Streams</h4>
+            <span class="badge" id="runningStreamsBadge">Running: 0</span>
+        </div>
+        <ul class="streams-list" id="runningStreamsList"></ul>
+    </div>
+
     <div class="btn-row">
         <button class="btn btn-start" id="startBtn" onclick="startStream()">Start Live Stream</button>
         <button class="btn btn-update" id="updateBtn" onclick="updatePlaylist()">Update Playlist</button>
@@ -245,6 +263,8 @@ const Dashboard = `
             {
                 id: DEFAULT_PROFILE_ID,
                 name: 'Default',
+                stream_key: '',
+                stream_url_template: 'rtmp://10.16.0.165:1935/live/%s',
                 audio_dir: '',
                 playlist_order: 'normal',
                 stream_end_mode: 'forever',
@@ -263,6 +283,8 @@ const Dashboard = `
         return {
             id: DEFAULT_PROFILE_ID,
             name: 'Default',
+            stream_key: legacy.stream_key || '',
+            stream_url_template: legacy.stream_url_template || 'rtmp://10.16.0.165:1935/live/%s',
             audio_dir: legacy.audio_dir || '',
             playlist_order: legacy.playlist_order || 'normal',
             stream_end_mode: legacy.stream_end_mode || 'forever',
@@ -288,6 +310,8 @@ const Dashboard = `
                 normalized.push({
                     id,
                     name: String(raw.name || '').trim() || (id === DEFAULT_PROFILE_ID ? 'Default' : 'Profile'),
+                    stream_key: String(raw.stream_key || legacy.stream_key || ''),
+                    stream_url_template: String(raw.stream_url_template || legacy.stream_url_template || 'rtmp://10.16.0.165:1935/live/%s'),
                     audio_dir: String(raw.audio_dir || ''),
                     playlist_order: String(raw.playlist_order || 'normal'),
                     stream_end_mode: String(raw.stream_end_mode || 'forever'),
@@ -339,6 +363,8 @@ const Dashboard = `
     function applySelectedProfileToForm() {
         const p = getSelectedProfile();
         if (!p) return;
+        document.getElementById('streamKey').value = p.stream_key || '';
+        document.getElementById('streamUrlTemplate').value = p.stream_url_template || 'rtmp://10.16.0.165:1935/live/%s';
         document.getElementById('audioDir').value = p.audio_dir || '';
         document.getElementById('playlistOrder').value = p.playlist_order || 'normal';
         document.getElementById('streamEndMode').value = p.stream_end_mode || 'forever';
@@ -357,6 +383,8 @@ const Dashboard = `
         const p = getSelectedProfile();
         if (!p) return;
         p.name = String(document.getElementById('profileName').value || '').trim() || (p.id === DEFAULT_PROFILE_ID ? 'Default' : 'Profile');
+        p.stream_key = document.getElementById('streamKey').value;
+        p.stream_url_template = document.getElementById('streamUrlTemplate').value;
         p.audio_dir = document.getElementById('audioDir').value;
         p.playlist_order = document.getElementById('playlistOrder').value;
         p.stream_end_mode = document.getElementById('streamEndMode').value;
@@ -375,6 +403,8 @@ const Dashboard = `
         profileState.profiles.push({
             id,
             name: 'Profile ' + profileState.profiles.length,
+            stream_key: '',
+            stream_url_template: 'rtmp://10.16.0.165:1935/live/%s',
             audio_dir: '',
             playlist_order: 'normal',
             stream_end_mode: 'forever',
@@ -442,6 +472,55 @@ const Dashboard = `
         if (el) el.innerText = '';
     }
 
+    async function stopSpecificStream(profileId) {
+        await stopStream(profileId, false);
+    }
+
+    function renderRunningStreams(streams, selectedProfileId) {
+        const box = document.getElementById('runningStreamsBox');
+        const list = document.getElementById('runningStreamsList');
+        const badge = document.getElementById('runningStreamsBadge');
+        if (!box || !list || !badge) return;
+
+        const running = Array.isArray(streams) ? streams : [];
+        badge.innerText = 'Running: ' + running.length;
+        list.innerHTML = '';
+
+        if (!running.length) {
+            box.style.display = 'none';
+            return;
+        }
+
+        for (const st of running) {
+            const item = document.createElement('li');
+            const meta = document.createElement('div');
+            meta.className = 'streams-meta';
+
+            const title = document.createElement('strong');
+            title.innerText = st.profileId === selectedProfileId ? (st.profileId + ' (selected)') : st.profileId;
+            meta.appendChild(title);
+
+            const details = document.createElement('span');
+            const currentSong = st.currentSong || 'Loading...';
+            const total = st.songTotal || 0;
+            const index = st.songIndex || 0;
+            details.innerText = 'Song ' + index + ' / ' + total + ' • ' + currentSong;
+            meta.appendChild(details);
+
+            const stop = document.createElement('button');
+            stop.type = 'button';
+            stop.className = 'btn-stop-mini';
+            stop.innerText = 'Stop';
+            stop.onclick = function() { stopSpecificStream(st.profileId); };
+
+            item.appendChild(meta);
+            item.appendChild(stop);
+            list.appendChild(item);
+        }
+
+        box.style.display = 'block';
+    }
+
     document.addEventListener('DOMContentLoaded', async function() {
         initSidebar();
         document.getElementById('profileSelect').addEventListener('change', function(e) {
@@ -490,6 +569,8 @@ const Dashboard = `
             const s = await res.json();
 
             const legacyProfile = {
+                stream_key: s.stream_key || '',
+                stream_url_template: s.stream_url_template || '',
                 audio_dir: s.audio_dir || '',
                 playlist_order: s.playlist_order || (s.shuffle_playlist ? 'shuffle' : 'normal'),
                 stream_end_mode: s.stream_end_mode || 'forever',
@@ -502,7 +583,6 @@ const Dashboard = `
                 next_song_label: s.next_song_label !== undefined ? s.next_song_label : 'Next song:'
             };
 
-            document.getElementById('streamKey').value = s.stream_key || '';
             document.getElementById('videoCodec').value   = s.video_codec   || 'libx264';
             document.getElementById('videoPreset').value  = s.video_preset  || 'ultrafast';
             document.getElementById('videoBitrate').value = s.video_bitrate || '6000k';
@@ -533,7 +613,8 @@ const Dashboard = `
         const payload = {
             selected_profile:  profileState.selectedProfile,
             profiles:          profileState.profiles,
-            stream_key:        document.getElementById('streamKey').value,
+            stream_key:        activeProfile.stream_key || '',
+            stream_url_template: activeProfile.stream_url_template || 'rtmp://10.16.0.165:1935/live/%s',
             video_path:        activeProfile.video_path,
             audio_dir:         activeProfile.audio_dir,
             playlist_order:    activeProfile.playlist_order,
@@ -575,8 +656,11 @@ const Dashboard = `
 
     async function fetchStatus() {
         try {
-            const res = await fetch('/api/status');
+            const currentProfileId = profileState.selectedProfile || DEFAULT_PROFILE_ID;
+            const res = await fetch('/api/status?profileId=' + encodeURIComponent(currentProfileId));
             const data = await res.json();
+            const current = data.current || data;
+            const runningStreams = Array.isArray(data.streams) ? data.streams : (current && current.isRunning ? [current] : []);
 
             const statusBox = document.getElementById('statusBox');
             const statusText = document.getElementById('statusText');
@@ -587,10 +671,11 @@ const Dashboard = `
             const inputsPanel = document.getElementById('inputsPanel');
             const playlistBox = document.getElementById('playlistBox');
 
-            isStreaming = !!data.isRunning;
+            isStreaming = !!current.isRunning;
+            renderRunningStreams(runningStreams, currentProfileId);
 
             if (isStreaming) {
-                renderSongList(data.songs || [], data.currentSong || "");
+                renderSongList(current.songs || [], current.currentSong || "");
             } else if (previewSongs.length > 0) {
                 renderSongList(previewSongs, "");
             } else {
@@ -600,8 +685,8 @@ const Dashboard = `
             if (isStreaming) {
                 statusBox.classList.add('running');
                 statusText.innerText = "Live / Streaming";
-                nowPlaying.innerText = data.currentSong || "Loading...";
-                updateStreamingMeta(data.startedAt, data.songIndex, data.songTotal);
+                nowPlaying.innerText = current.currentSong || "Loading...";
+                updateStreamingMeta(current.startedAt, current.songIndex, current.songTotal);
                 startBtn.style.display = "none";
                 updateBtn.style.display = "block";
                 stopBtn.style.display = "block";
@@ -626,6 +711,10 @@ const Dashboard = `
     function setInputsDisabled(container, disabled) {
         const fields = container.querySelectorAll('input, select');
         for (const field of fields) {
+            if (field.id === 'profileSelect' || field.id === 'profileName') {
+                field.disabled = false;
+                continue;
+            }
             if (field.id === 'playlistOrder' || field.id === 'audioDir' || field.id === 'streamEndMode' || field.id === 'endAfterMinutes') {
                 field.disabled = false;
                 continue;
@@ -633,17 +722,8 @@ const Dashboard = `
             field.disabled = disabled;
         }
 
-        if (disabled) {
-            document.getElementById('profileSelect').disabled = true;
-            document.getElementById('profileName').disabled = true;
-            document.getElementById('addProfileBtn').disabled = true;
-            document.getElementById('deleteProfileBtn').disabled = true;
-        } else {
-            document.getElementById('profileSelect').disabled = false;
-            document.getElementById('profileName').disabled = false;
-            document.getElementById('addProfileBtn').disabled = false;
-            renderProfiles();
-        }
+        document.getElementById('addProfileBtn').disabled = false;
+        renderProfiles();
     }
 
     function renderSongList(songs, currentSong) {
@@ -673,7 +753,9 @@ const Dashboard = `
         saveSelectedProfileFromForm();
 
         const payload = {
+            profileId: profileState.selectedProfile,
             streamKey: document.getElementById('streamKey').value,
+            streamUrlTemplate: document.getElementById('streamUrlTemplate').value,
             videoPath: document.getElementById('videoPath').value,
             audioDir: document.getElementById('audioDir').value,
             playlistOrder: document.getElementById('playlistOrder').value,
@@ -708,11 +790,19 @@ const Dashboard = `
         document.getElementById('startBtn').innerText = "Start Live Stream";
     }
 
-    async function stopStream() {
-        if (confirm("Are you sure you want to stop the stream?")) {
-            await fetch('/api/stop', { method: 'POST' });
-            setTimeout(fetchStatus, 500);
+    async function stopStream(profileId, askConfirm) {
+        const targetProfile = profileId || profileState.selectedProfile;
+        const shouldConfirm = askConfirm !== false;
+        if (shouldConfirm && !confirm('Are you sure you want to stop stream "' + targetProfile + '"?')) {
+            return;
         }
+
+        await fetch('/api/stop', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ profileId: targetProfile })
+        });
+        setTimeout(fetchStatus, 500);
     }
 
     async function updatePlaylist() {
@@ -726,6 +816,7 @@ const Dashboard = `
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
+                    profileId: profileState.selectedProfile,
                     playlistOrder: document.getElementById('playlistOrder').value,
                     audioDir: document.getElementById('audioDir').value,
                     streamEndMode: document.getElementById('streamEndMode').value,
