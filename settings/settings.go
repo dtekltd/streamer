@@ -13,23 +13,25 @@ const filePath = "settings.yaml"
 const DefaultProfileID = "default"
 
 type StreamProfile struct {
-	ID                string `yaml:"id"                json:"id"`
-	Name              string `yaml:"name"              json:"name"`
-	StreamKey         string `yaml:"stream_key"        json:"stream_key"`
-	StreamURLTemplate string `yaml:"stream_url_template" json:"stream_url_template"`
-	AudioDir          string `yaml:"audio_dir"         json:"audio_dir"`
-	EnableVideoAudio  bool   `yaml:"enable_video_audio" json:"enable_video_audio"`
-	VideoAudioVolume  string `yaml:"video_audio_volume" json:"video_audio_volume"`
-	FFmpegArgs        string `yaml:"ffmpeg_args"       json:"ffmpeg_args"`
-	PlaylistOrder     string `yaml:"playlist_order"    json:"playlist_order"`
-	StreamEndMode     string `yaml:"stream_end_mode"   json:"stream_end_mode"`
-	EndAfterMinutes   string `yaml:"end_after_minutes" json:"end_after_minutes"`
-	VideoPath         string `yaml:"video_path"        json:"video_path"`
-	FontPath          string `yaml:"font_path"         json:"font_path"`
-	TextX             string `yaml:"text_x"            json:"text_x"`
-	TextY             string `yaml:"text_y"            json:"text_y"`
-	NowPlayingLabel   string `yaml:"now_playing_label" json:"now_playing_label"`
-	NextSongLabel     string `yaml:"next_song_label"   json:"next_song_label"`
+	ID                 string `yaml:"id"                json:"id"`
+	Name               string `yaml:"name"              json:"name"`
+	StreamKey          string `yaml:"stream_key"        json:"stream_key"`
+	StreamURLTemplate  string `yaml:"stream_url_template" json:"stream_url_template"`
+	AudioDir           string `yaml:"audio_dir"         json:"audio_dir"`
+	EnableVideoAudio   bool   `yaml:"enable_video_audio" json:"enable_video_audio"`
+	VideoAudioVolume   string `yaml:"video_audio_volume" json:"video_audio_volume"`
+	FFmpegArgs         string `yaml:"ffmpeg_args"       json:"ffmpeg_args"`
+	PlaylistOrder      string `yaml:"playlist_order"    json:"playlist_order"`
+	StreamEndMode      string `yaml:"stream_end_mode"   json:"stream_end_mode"`
+	EndAfterMinutes    string `yaml:"end_after_minutes" json:"end_after_minutes"`
+	VideoPath          string `yaml:"video_path"        json:"video_path"`
+	FontPath           string `yaml:"font_path"         json:"font_path"`
+	TextX              string `yaml:"text_x"            json:"text_x"`
+	TextY              string `yaml:"text_y"            json:"text_y"`
+	EnablePlayingLabel bool   `yaml:"enable_playing_label" json:"enable_playing_label"`
+	NowPlayingLabel    string `yaml:"now_playing_label" json:"now_playing_label"`
+	EnableNextLabel    bool   `yaml:"enable_next_label" json:"enable_next_label"`
+	NextSongLabel      string `yaml:"next_song_label"   json:"next_song_label"`
 }
 
 // DashboardSettings holds all user-configurable dashboard fields.
@@ -137,23 +139,25 @@ func normalizeProfiles(s *DashboardSettings) {
 			}
 
 			normalized = append(normalized, StreamProfile{
-				ID:                id,
-				Name:              name,
-				StreamKey:         p.StreamKey,
-				StreamURLTemplate: defaultString(p.StreamURLTemplate, legacyTemplate),
-				AudioDir:          p.AudioDir,
-				EnableVideoAudio:  p.EnableVideoAudio,
-				VideoAudioVolume:  defaultString(p.VideoAudioVolume, "1.0"),
-				FFmpegArgs:        defaultString(p.FFmpegArgs, defaultFFmpegArgs()),
-				PlaylistOrder:     p.PlaylistOrder,
-				StreamEndMode:     p.StreamEndMode,
-				EndAfterMinutes:   p.EndAfterMinutes,
-				VideoPath:         p.VideoPath,
-				FontPath:          p.FontPath,
-				TextX:             p.TextX,
-				TextY:             p.TextY,
-				NowPlayingLabel:   p.NowPlayingLabel,
-				NextSongLabel:     p.NextSongLabel,
+				ID:                 id,
+				Name:               name,
+				StreamKey:          p.StreamKey,
+				StreamURLTemplate:  defaultString(p.StreamURLTemplate, legacyTemplate),
+				AudioDir:           p.AudioDir,
+				EnableVideoAudio:   p.EnableVideoAudio,
+				VideoAudioVolume:   defaultString(p.VideoAudioVolume, "1.0"),
+				FFmpegArgs:         defaultString(p.FFmpegArgs, defaultFFmpegArgs()),
+				PlaylistOrder:      p.PlaylistOrder,
+				StreamEndMode:      p.StreamEndMode,
+				EndAfterMinutes:    p.EndAfterMinutes,
+				VideoPath:          p.VideoPath,
+				FontPath:           p.FontPath,
+				TextX:              p.TextX,
+				TextY:              p.TextY,
+				EnablePlayingLabel: p.EnablePlayingLabel,
+				NowPlayingLabel:    p.NowPlayingLabel,
+				EnableNextLabel:    p.EnableNextLabel,
+				NextSongLabel:      p.NextSongLabel,
 			})
 		}
 
@@ -191,23 +195,25 @@ func normalizeProfiles(s *DashboardSettings) {
 
 func buildDefaultProfile() StreamProfile {
 	return StreamProfile{
-		ID:                DefaultProfileID,
-		Name:              "Default",
-		StreamKey:         "",
-		StreamURLTemplate: "rtmp://10.16.0.165:1935/live/%s",
-		AudioDir:          "",
-		EnableVideoAudio:  false,
-		VideoAudioVolume:  "1.0",
-		FFmpegArgs:        defaultFFmpegArgs(),
-		PlaylistOrder:     "normal",
-		StreamEndMode:     "forever",
-		EndAfterMinutes:   "60",
-		VideoPath:         "",
-		FontPath:          "",
-		TextX:             "30",
-		TextY:             "h-th-30",
-		NowPlayingLabel:   "Now Playing:",
-		NextSongLabel:     "Next song:",
+		ID:                 DefaultProfileID,
+		Name:               "Default",
+		StreamKey:          "",
+		StreamURLTemplate:  "rtmp://10.16.0.165:1935/live/%s",
+		AudioDir:           "",
+		EnableVideoAudio:   false,
+		VideoAudioVolume:   "1.0",
+		FFmpegArgs:         defaultFFmpegArgs(),
+		PlaylistOrder:      "normal",
+		StreamEndMode:      "forever",
+		EndAfterMinutes:    "60",
+		VideoPath:          "",
+		FontPath:           "",
+		TextX:              "30",
+		TextY:              "h-th-30",
+		EnablePlayingLabel: true,
+		NowPlayingLabel:    "Now Playing:",
+		EnableNextLabel:    true,
+		NextSongLabel:      "Next song:",
 	}
 }
 

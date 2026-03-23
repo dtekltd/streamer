@@ -17,9 +17,10 @@ func main() {
 	mode := flag.String("mode", "prod", "application mode: prod or dev")
 	port := flag.String("port", "8080", "http server port")
 	logs := flag.Bool("logs", true, "enable application logging")
+	ffmpegLogLevel := flag.String("ffmpeg-loglevel", "error", "FFmpeg log level (e.g., quiet, panic, fatal, error, warning, info, verbose, debug)")
 	flag.Parse()
 
-	cfg := config.New(*mode, *port, *logs)
+	cfg := config.New(*mode, *port, *logs, *ffmpegLogLevel)
 	listenAddr := ":" + cfg.ServerPort
 
 	app := fiber.New(fiber.Config{

@@ -3,16 +3,18 @@ package config
 import "strings"
 
 type AppConfig struct {
-	ServerMode    string
-	ServerPort    string
-	EnableLogging bool
+	ServerMode     string
+	ServerPort     string
+	EnableLogging  bool
+	FFmpegLogLevel string
 }
 
-func New(mode, port string, enableLogging bool) *AppConfig {
+func New(mode, port string, enableLogging bool, ffmpegLogLevel string) *AppConfig {
 	return &AppConfig{
-		ServerMode:    normalizeAppMode(mode),
-		ServerPort:    normalizePort(port),
-		EnableLogging: enableLogging,
+		ServerMode:     normalizeAppMode(mode),
+		ServerPort:     normalizePort(port),
+		EnableLogging:  enableLogging,
+		FFmpegLogLevel: normalizeFFmpegLogLevel(ffmpegLogLevel),
 	}
 }
 
@@ -34,4 +36,14 @@ func normalizeAppMode(mode string) string {
 		return "dev"
 	}
 	return "prod"
+}
+
+func normalizeFFmpegLogLevel(level string) string {
+	trimmed := strings.ToLower(strings.TrimSpace(level))
+	switch trimmed {
+	case "quiet", "panic", "fatal", "error", "warning", "info", "verbose", "debug":
+		return trimmed
+	default:
+		return "error"
+	}
 }

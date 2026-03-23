@@ -150,24 +150,27 @@ const Dashboard = `
         </div>
 
         <div class="field" style="margin-top: 12px;">
-                    <label for="videoPath">Background Video Path</label>
-                    <input type="text" id="videoPath" value="" placeholder="C:\\videos\\loop.mp4 or ./loop.mp4">
-                </div>
+            <label for="videoPath">Background Video Path</label>
+            <input type="text" id="videoPath" value="" placeholder="C:\\videos\\loop.mp4 or ./loop.mp4">
+        </div>
 
-                <div class="row-2" style="margin-top: 12px;">
-                    <div class="field">
-                        <label for="enableVideoAudio">Enable Audio</label>
-                        <div class="checkbox-row">
-                            <input type="checkbox" id="enableVideoAudio">
-                            <label for="enableVideoAudio">Mix video audio</label>
-                        </div>
-                    </div>
-                    <div class="field">
-                        <label for="videoAudioVolume">Volume</label>
-                        <input type="text" id="videoAudioVolume" value="1.0" placeholder="1.0">
-                    </div>
+        <div class="row-2" style="margin-top: 12px;">
+            <div class="field">
+                <label for="enableVideoAudio">Enable Audio</label>
+                <div class="checkbox-row">
+                    <input type="checkbox" id="enableVideoAudio">
+                    <label for="enableVideoAudio">Mix video audio</label>
                 </div>
+            </div>
+            <div class="field">
+                <label for="videoAudioVolume">Volume</label>
+                <input type="text" id="videoAudioVolume" value="1.0" placeholder="1.0">
+            </div>
+        </div>
 
+        <details class="group" id="textOverlayGroup">
+            <summary>Text Overlay</summary>
+            <div class="group-body">
                 <div class="field">
                     <label for="fontPath">Font File Path</label>
                     <input type="text" id="fontPath" value="" placeholder="font.ttf">
@@ -185,18 +188,27 @@ const Dashboard = `
                     </div>
                 </div>
 
-                <div class="row-2">
-                    <div class="field">
-                        <label for="nowPlayingLabel">Playing Label</label>
-                        <input type="text" id="nowPlayingLabel" value="Now Playing:" placeholder="Now Playing:">
-                    </div>
-                    <div class="field">
-                        <label for="nextSongLabel">Next Label</label>
-                        <input type="text" id="nextSongLabel" value="Next song:" placeholder="Leave empty to hide">
-                    </div>
+                <div class="checkbox-row">
+                    <input type="checkbox" id="enablePlayingLabel" checked>
+                    <label for="enablePlayingLabel">Playing Label</label>
+                </div>
+                <div class="field" id="nowPlayingLabelField">
+                    <label for="nowPlayingLabel">Custom text (default: "Now playing")</label>
+                    <input type="text" id="nowPlayingLabel" value="Now Playing:" placeholder="Now Playing:">
                 </div>
 
-        <details class="group" id="ffmpegArgsGroup" open>
+                <div class="checkbox-row">
+                    <input type="checkbox" id="enableNextLabel" checked>
+                    <label for="enableNextLabel">Next Label</label>
+                </div>
+                <div class="field" id="nextSongLabelField">
+                    <label for="nextSongLabel">Custom text (default: "Next song")</label>
+                    <input type="text" id="nextSongLabel" value="Next song:" placeholder="Next song:">
+                </div>
+            </div>
+        </details>
+
+        <details class="group" id="ffmpegArgsGroup">
             <summary>FFmpeg Args</summary>
             <div class="group-body">
                 <div class="field">
@@ -310,7 +322,9 @@ const Dashboard = `
                 font_path: '',
                 text_x: '30',
                 text_y: 'h-th-30',
+                enable_playing_label: true,
                 now_playing_label: 'Now Playing:',
+                enable_next_label: true,
                 next_song_label: 'Next song:'
             }
         ]
@@ -333,7 +347,9 @@ const Dashboard = `
             font_path: legacy.font_path || '',
             text_x: legacy.text_x || '30',
             text_y: legacy.text_y || 'h-th-30',
+            enable_playing_label: legacy.enable_playing_label !== undefined ? !!legacy.enable_playing_label : true,
             now_playing_label: legacy.now_playing_label !== undefined ? legacy.now_playing_label : 'Now Playing:',
+            enable_next_label: legacy.enable_next_label !== undefined ? !!legacy.enable_next_label : true,
             next_song_label: legacy.next_song_label !== undefined ? legacy.next_song_label : 'Next song:'
         };
     }
@@ -363,7 +379,9 @@ const Dashboard = `
                     font_path: String(raw.font_path || ''),
                     text_x: String(raw.text_x || '30'),
                     text_y: String(raw.text_y || 'h-th-30'),
+                    enable_playing_label: raw.enable_playing_label !== undefined ? !!raw.enable_playing_label : true,
                     now_playing_label: raw.now_playing_label !== undefined ? String(raw.now_playing_label) : 'Now Playing:',
+                    enable_next_label: raw.enable_next_label !== undefined ? !!raw.enable_next_label : true,
                     next_song_label: raw.next_song_label !== undefined ? String(raw.next_song_label) : 'Next song:'
                 });
             }
@@ -419,11 +437,14 @@ const Dashboard = `
         document.getElementById('fontPath').value = p.font_path || '';
         document.getElementById('textX').value = p.text_x || '30';
         document.getElementById('textY').value = p.text_y || 'h-th-30';
+        document.getElementById('enablePlayingLabel').checked = p.enable_playing_label !== undefined ? !!p.enable_playing_label : true;
         document.getElementById('nowPlayingLabel').value = p.now_playing_label !== undefined ? p.now_playing_label : 'Now Playing:';
+        document.getElementById('enableNextLabel').checked = p.enable_next_label !== undefined ? !!p.enable_next_label : true;
         document.getElementById('nextSongLabel').value = p.next_song_label !== undefined ? p.next_song_label : 'Next song:';
         document.getElementById('profileName').value = p.name || 'Profile';
         updateEndAfterVisibility();
         updateVideoAudioVolumeState();
+        updateTextLabelStates();
     }
 
     function saveSelectedProfileFromForm() {
@@ -443,7 +464,9 @@ const Dashboard = `
         p.font_path = document.getElementById('fontPath').value;
         p.text_x = document.getElementById('textX').value;
         p.text_y = document.getElementById('textY').value;
+        p.enable_playing_label = document.getElementById('enablePlayingLabel').checked;
         p.now_playing_label = document.getElementById('nowPlayingLabel').value;
+        p.enable_next_label = document.getElementById('enableNextLabel').checked;
         p.next_song_label = document.getElementById('nextSongLabel').value;
     }
 
@@ -466,7 +489,9 @@ const Dashboard = `
             font_path: '',
             text_x: '30',
             text_y: 'h-th-30',
+            enable_playing_label: true,
             now_playing_label: 'Now Playing:',
+            enable_next_label: true,
             next_song_label: 'Next song:'
         });
         profileState.selectedProfile = id;
@@ -597,8 +622,17 @@ const Dashboard = `
 
         document.getElementById('streamEndMode').addEventListener('change', updateEndAfterVisibility);
         document.getElementById('enableVideoAudio').addEventListener('change', updateVideoAudioVolumeState);
+        document.getElementById('enablePlayingLabel').addEventListener('change', function() {
+            updateTextLabelStates();
+            scheduleSettingsSave();
+        });
+        document.getElementById('enableNextLabel').addEventListener('change', function() {
+            updateTextLabelStates();
+            scheduleSettingsSave();
+        });
         updateEndAfterVisibility();
         updateVideoAudioVolumeState();
+        updateTextLabelStates();
     });
 
     function initSidebar() {
@@ -657,6 +691,14 @@ const Dashboard = `
     function updateVideoAudioVolumeState() {
         const enabled = document.getElementById('enableVideoAudio').checked;
         document.getElementById('videoAudioVolume').disabled = !enabled;
+    }
+
+    function updateTextLabelStates() {
+        const playingEnabled = document.getElementById('enablePlayingLabel').checked;
+        document.getElementById('nowPlayingLabelField').style.display = playingEnabled ? 'block' : 'none';
+        
+        const nextEnabled = document.getElementById('enableNextLabel').checked;
+        document.getElementById('nextSongLabelField').style.display = nextEnabled ? 'block' : 'none';
     }
 
     function scheduleSettingsSave() {
@@ -808,6 +850,26 @@ const Dashboard = `
     async function startStream() {
         saveSelectedProfileFromForm();
 
+        const enablePlayingLabel = document.getElementById('enablePlayingLabel').checked;
+        const enableNextLabel = document.getElementById('enableNextLabel').checked;
+        let nowPlayingLabel = document.getElementById('nowPlayingLabel').value;
+        let nextSongLabel = document.getElementById('nextSongLabel').value;
+
+        // Use default labels if enabled but empty
+        if (enablePlayingLabel && !nowPlayingLabel.trim()) {
+            nowPlayingLabel = 'Now playing';
+        }
+        if (enableNextLabel && !nextSongLabel.trim()) {
+            nextSongLabel = 'Next song';
+        }
+        // If not enabled, don't send the label
+        if (!enablePlayingLabel) {
+            nowPlayingLabel = '';
+        }
+        if (!enableNextLabel) {
+            nextSongLabel = '';
+        }
+
         const payload = {
             profileId: profileState.selectedProfile,
             streamKey: document.getElementById('streamKey').value,
@@ -823,8 +885,10 @@ const Dashboard = `
             fontPath: document.getElementById('fontPath').value,
             textX: document.getElementById('textX').value,
             textY: document.getElementById('textY').value,
-            nowPlayingLabel: document.getElementById('nowPlayingLabel').value,
-            nextSongLabel: document.getElementById('nextSongLabel').value
+            enablePlayingLabel: enablePlayingLabel,
+            nowPlayingLabel: nowPlayingLabel,
+            enableNextLabel: enableNextLabel,
+            nextSongLabel: nextSongLabel
         };
 
         if (!payload.streamKey) {

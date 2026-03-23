@@ -104,8 +104,16 @@ func (s *Service) Start(req StartRequest) error {
 	state.songs = songs
 	state.currentSong = ""
 	state.nextSong = ""
-	state.nowPlayingLabel = normalizeNowPlayingLabel(req.NowPlayingLabel)
-	state.nextSongLabel = normalizeNextSongLabel(req.NextSongLabel)
+	state.enablePlayingLabel = req.EnablePlayingLabel
+	state.nowPlayingLabel = ""
+	if req.EnablePlayingLabel {
+		state.nowPlayingLabel = normalizeNowPlayingLabel(req.NowPlayingLabel)
+	}
+	state.enableNextLabel = req.EnableNextLabel
+	state.nextSongLabel = ""
+	if req.EnableNextLabel {
+		state.nextSongLabel = normalizeNextSongLabel(req.NextSongLabel)
+	}
 	state.streamEndMode = streamEndMode
 	state.endAfter = endAfter
 	state.startedAt = time.Now()
@@ -347,11 +355,13 @@ func (s *Service) runStream(ctx context.Context, profileID, streamKey, streamURL
 		state.isRunning = false
 		state.currentSong = ""
 		state.nextSong = ""
+		state.enablePlayingLabel = false
+		state.nowPlayingLabel = ""
+		state.enableNextLabel = false
+		state.nextSongLabel = ""
 		state.streamEndMode = ""
 		state.endAfter = 0
 		state.startedAt = time.Time{}
-		state.nowPlayingLabel = ""
-		state.nextSongLabel = ""
 		state.audioDir = ""
 		state.cancel = nil
 		state.mu.Unlock()
@@ -363,7 +373,7 @@ func (s *Service) runStream(ctx context.Context, profileID, streamKey, streamURL
 	audioInputURL := fmt.Sprintf("http://127.0.0.1:%s/internal/audio/%s", s.cfg.ServerPort, url.PathEscape(profileID))
 	args := []string{
 		"-hide_banner",
-		"-loglevel", "error",
+		"-loglevel", s.cfg.FFmpegLogLevel,
 		"-nostats",
 	}
 	filterParts := make([]string, 0, 4)

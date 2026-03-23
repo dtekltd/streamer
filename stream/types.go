@@ -20,20 +20,22 @@ const (
 )
 
 type StreamState struct {
-	mu              sync.Mutex
-	isRunning       bool
-	playlistOrder   string
-	streamEndMode   string
-	isEnding        bool
-	endAfter        time.Duration
-	startedAt       time.Time
-	currentSong     string
-	nextSong        string
-	nowPlayingLabel string
-	nextSongLabel   string
-	songs           []Song
-	audioDir        string
-	cancel          context.CancelFunc
+	mu                 sync.Mutex
+	isRunning          bool
+	playlistOrder      string
+	streamEndMode      string
+	isEnding           bool
+	endAfter           time.Duration
+	startedAt          time.Time
+	currentSong        string
+	nextSong           string
+	enablePlayingLabel bool
+	nowPlayingLabel    string
+	enableNextLabel    bool
+	nextSongLabel      string
+	songs              []Song
+	audioDir           string
+	cancel             context.CancelFunc
 }
 
 type PlaylistItem struct {
@@ -54,22 +56,24 @@ type Status struct {
 }
 
 type StartRequest struct {
-	ProfileID         string `json:"profileId"`
-	StreamKey         string `json:"streamKey"`
-	StreamURLTemplate string `json:"streamUrlTemplate"`
-	VideoPath         string `json:"videoPath"`
-	EnableVideoAudio  bool   `json:"enableVideoAudio"`
-	VideoAudioVolume  string `json:"videoAudioVolume"`
-	AudioDir          string `json:"audioDir"`
-	FFmpegArgs        string `json:"ffmpegArgs"`
-	PlaylistOrder     string `json:"playlistOrder"`
-	StreamEndMode     string `json:"streamEndMode"`
-	EndAfterMinutes   string `json:"endAfterMinutes"`
-	FontPath          string `json:"fontPath"`
-	TextX             string `json:"textX"`
-	TextY             string `json:"textY"`
-	NowPlayingLabel   string `json:"nowPlayingLabel"`
-	NextSongLabel     string `json:"nextSongLabel"`
+	ProfileID          string `json:"profileId"`
+	StreamKey          string `json:"streamKey"`
+	StreamURLTemplate  string `json:"streamUrlTemplate"`
+	VideoPath          string `json:"videoPath"`
+	EnableVideoAudio   bool   `json:"enableVideoAudio"`
+	VideoAudioVolume   string `json:"videoAudioVolume"`
+	AudioDir           string `json:"audioDir"`
+	FFmpegArgs         string `json:"ffmpegArgs"`
+	PlaylistOrder      string `json:"playlistOrder"`
+	StreamEndMode      string `json:"streamEndMode"`
+	EndAfterMinutes    string `json:"endAfterMinutes"`
+	FontPath           string `json:"fontPath"`
+	TextX              string `json:"textX"`
+	TextY              string `json:"textY"`
+	EnablePlayingLabel bool   `json:"enablePlayingLabel"`
+	NowPlayingLabel    string `json:"nowPlayingLabel"`
+	EnableNextLabel    bool   `json:"enableNextLabel"`
+	NextSongLabel      string `json:"nextSongLabel"`
 }
 
 type Song struct {
