@@ -1,0 +1,24 @@
+{
+  "name": "youtube-streamer-dashboard",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@quasar/extras": "^1.16.15",
+    "pinia": "^2.3.1",
+    "quasar": "^2.18.1",
+    "vue": "^3.5.17",
+    "vue-router": "^4.5.1"
+  },
+  "devDependencies": {
+    "@quasar/vite-plugin": "^1.10.0",
+    "@vitejs/plugin-vue": "^5.2.4",
+    "sass-embedded": "^1.98.0",
+    "vite": "^5.4.19"
+  }
+}

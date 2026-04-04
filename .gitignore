@@ -7,3 +7,4 @@ now_playing*.txt
 next_playing*.txt
 /dist
 /tmp
+frontend/node_modules/

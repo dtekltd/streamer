@@ -14,10 +14,37 @@ go run ./cmd/streamer
 With runtime flags:
 
 ```bash
-go run ./cmd/streamer --mode=dev --port=8080 --logs=true
+go run ./cmd/streamer --mode=dev --port=8080 --logs=true --pin=gostream
 ```
 
 3. Open the dashboard at `http://localhost:8080` (or your configured port).
+
+Default login PIN is `gostream`. Override it with `--pin=YOUR_PIN`.
+
+## Frontend (Quasar + Vue)
+
+The dashboard is now a Quasar Vue SPA located in `frontend/`.
+
+Install dependencies:
+
+```bash
+cd frontend
+npm install
+```
+
+Run frontend in development mode (with API proxy to `localhost:8080`):
+
+```bash
+npm run dev
+```
+
+Build production SPA assets:
+
+```bash
+npm run build
+```
+
+Production build output is `frontend/dist/spa`. The Go server serves this folder automatically when present.
 
 Auto-start from saved settings:
 

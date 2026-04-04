@@ -7,14 +7,16 @@ type AppConfig struct {
 	ServerPort     string
 	EnableLogging  bool
 	FFmpegLogLevel string
+	LoginPIN       string
 }
 
-func New(mode, port string, enableLogging bool, ffmpegLogLevel string) *AppConfig {
+func New(mode, port string, enableLogging bool, ffmpegLogLevel, loginPIN string) *AppConfig {
 	return &AppConfig{
 		ServerMode:     normalizeAppMode(mode),
 		ServerPort:     normalizePort(port),
 		EnableLogging:  enableLogging,
 		FFmpegLogLevel: normalizeFFmpegLogLevel(ffmpegLogLevel),
+		LoginPIN:       normalizeLoginPIN(loginPIN),
 	}
 }
 
@@ -46,4 +48,12 @@ func normalizeFFmpegLogLevel(level string) string {
 	default:
 		return "error"
 	}
+}
+
+func normalizeLoginPIN(pin string) string {
+	trimmed := strings.TrimSpace(pin)
+	if trimmed == "" {
+		return "gostream"
+	}
+	return trimmed
 }

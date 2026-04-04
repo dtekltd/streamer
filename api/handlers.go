@@ -2,8 +2,16 @@ package api
 
 import (
 	"bufio"
+	"crypto/rand"
+	"crypto/subtle"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"time"
 
 	"streamer/config"
 	apphtml "streamer/html"
@@ -16,10 +24,18 @@ import (
 type Handler struct {
 	streamService *stream.Service
 	cfg           *config.AppConfig
+	sessionMu     sync.Mutex
+	sessions      map[string]time.Time
 }
 
+const sessionTTL = 24 * time.Hour
+
+const authCookieName = "streamer_auth"
+
+var spaDistPath = filepath.Join("frontend", "dist", "spa")
+
 func NewHandler(cfg *config.AppConfig) *Handler {
-	return &Handler{streamService: stream.NewService(cfg), cfg: cfg}
+	return &Handler{streamService: stream.NewService(cfg), cfg: cfg, sessions: map[string]time.Time{}}
 }
 
 func (h *Handler) AutoStartFromSavedSettings() error {
@@ -71,21 +87,140 @@ func (h *Handler) AutoStartFromSavedSettings() error {
 }
 
 func (h *Handler) RegisterRoutes(app *fiber.App) {
+	app.Static("/", spaDistPath)
 	app.Get("/", h.serveDashboard)
+	app.Get("/profiles", h.serveDashboard)
+	app.Get("/streaming", h.serveDashboard)
 	app.Get("/internal/audio/:profileId", h.handleInternalAudio)
 
 	api := app.Group("/api")
+	api.Post("/auth/login", h.handleLogin)
+	api.Post("/auth/logout", h.requireAuth, h.handleLogout)
+	api.Get("/auth/me", h.requireAuth, h.handleAuthMe)
+
+	api.Use(h.requireAuth)
 	api.Post("/start", h.handleStartStream)
 	api.Post("/stop", h.handleStopStream)
 	api.Post("/update-playlist", h.handleUpdatePlaylist)
 	api.Get("/status", h.handleStatus)
 	api.Get("/settings", h.handleGetSettings)
 	api.Post("/settings", h.handleSaveSettings)
+
+	app.Get("/*", h.serveDashboard)
 }
 
 func (h *Handler) serveDashboard(c *fiber.Ctx) error {
+	if strings.HasPrefix(c.Path(), "/api/") || strings.HasPrefix(c.Path(), "/internal/") {
+		return c.SendStatus(fiber.StatusNotFound)
+	}
+
+	indexPath := filepath.Join(spaDistPath, "index.html")
+	if _, err := os.Stat(indexPath); err == nil {
+		return c.SendFile(indexPath)
+	}
+
 	c.Type("html", "utf-8")
 	return c.SendString(apphtml.Dashboard)
+}
+
+func (h *Handler) requireAuth(c *fiber.Ctx) error {
+	token := extractAuthToken(c)
+	if token == "" {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
+	}
+
+	h.sessionMu.Lock()
+	expiresAt, ok := h.sessions[token]
+	if !ok || time.Now().After(expiresAt) {
+		delete(h.sessions, token)
+		h.sessionMu.Unlock()
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
+	}
+	h.sessions[token] = time.Now().Add(sessionTTL)
+	h.sessionMu.Unlock()
+
+	return c.Next()
+}
+
+func (h *Handler) handleLogin(c *fiber.Ctx) error {
+	var req struct {
+		PIN string `json:"pin"`
+	}
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).SendString(err.Error())
+	}
+
+	provided := strings.TrimSpace(req.PIN)
+	expected := strings.TrimSpace(h.cfg.LoginPIN)
+	if subtle.ConstantTimeCompare([]byte(provided), []byte(expected)) != 1 {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid pin"})
+	}
+
+	token, err := randomToken()
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).SendString(err.Error())
+	}
+
+	h.sessionMu.Lock()
+	h.sessions[token] = time.Now().Add(sessionTTL)
+	h.sessionMu.Unlock()
+
+	c.Cookie(&fiber.Cookie{
+		Name:     authCookieName,
+		Value:    token,
+		Path:     "/",
+		HTTPOnly: true,
+		Secure:   false,
+		SameSite: "Lax",
+	})
+
+	return c.JSON(fiber.Map{"token": token})
+}
+
+func (h *Handler) handleLogout(c *fiber.Ctx) error {
+	token := extractAuthToken(c)
+	if token != "" {
+		h.sessionMu.Lock()
+		delete(h.sessions, token)
+		h.sessionMu.Unlock()
+	}
+
+	c.Cookie(&fiber.Cookie{
+		Name:     authCookieName,
+		Value:    "",
+		Path:     "/",
+		HTTPOnly: true,
+		Secure:   false,
+		SameSite: "Lax",
+		Expires:  time.Now().Add(-time.Hour),
+	})
+
+	return c.JSON(fiber.Map{"message": "logged out"})
+}
+
+func (h *Handler) handleAuthMe(c *fiber.Ctx) error {
+	return c.JSON(fiber.Map{"authenticated": true})
+}
+
+func extractAuthToken(c *fiber.Ctx) string {
+	if value := strings.TrimSpace(c.Get("X-Auth-Token")); value != "" {
+		return value
+	}
+
+	authorization := strings.TrimSpace(c.Get("Authorization"))
+	if strings.HasPrefix(strings.ToLower(authorization), "bearer ") {
+		return strings.TrimSpace(authorization[7:])
+	}
+
+	return strings.TrimSpace(c.Cookies(authCookieName))
+}
+
+func randomToken() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
 }
 
 func (h *Handler) handleStatus(c *fiber.Ctx) error {
